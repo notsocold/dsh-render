@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Rich rendering",
+    "description": "Render fenced code blocks in chat and document previews as Mermaid diagrams, ECharts charts, or CSV tables, with theme-aware output and a source toggle."
+  }
+}

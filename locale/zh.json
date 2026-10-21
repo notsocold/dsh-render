@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "渲染增强",
+    "description": "把对话与文档预览中的围栏代码块渲染成 Mermaid 图、ECharts 图表或 CSV 表格，支持主题跟随与源码切换。"
+  }
+}

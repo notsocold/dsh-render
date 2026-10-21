@@ -1,0 +1,10 @@
+# dsh-render bundle patch: mount the Host half in the profile.
+#
+# The Host half serves the vendored Mermaid / ECharts browser assets over the
+# authenticated /api/dsh-render/vendor/* routes, owns the Render settings
+# document, and optionally injects a prompt section that teaches the model to
+# prefer the supported diagram/chart fences. The Web half is declared through
+# package.json `dsh.client` and enhances Markdown code blocks in the page.
+- insert:
+    - id: dsh-render
+      name: '@local/dsh-render'
