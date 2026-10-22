@@ -57,6 +57,45 @@ dsh-render 的 `render` 图标（画框 + 折线图 + 星芒）需要：
 
 DSH 升级后若设置页导航图标回退成齿轮，按补丁快照重打并重建即可。
 
+### 跨机器安装 / 迁移
+
+插件是**自包含**的：无运行时 npm 依赖，Mermaid / ECharts 的浏览器资源随包提交，Host 半只用标准库与 DSH 服务。
+
+**随包内容**：Host/Web 代码、`vendor/`（Mermaid 12.2.0 + ECharts 6.1.0）、`locale/`（插件页显示名）、`icon.svg`、测试、`docs/harness-client.patch`（宿主图标补丁快照）、`scripts/sync-vendor.mjs`。
+
+**不随包内容**：
+
+- `$DSH_HOME/dsh-render/settings.json`（用户设置；目标机器用默认值自动重建）；
+- 目标 profile 的安装记录（需在目标机器重新 `install_bundle`）；
+- 设置导航图标（依赖宿主 `SettingsRoot.tsx` 补丁，需在目标机器按快照重打并重建 `ui-settings-general`）。
+
+**步骤**：
+
+1. 拷贝整个 `dsh-render/` 目录，或使用 `pnpm pack` 生成的 tarball：
+
+   ```bash
+   cd ~/work/NodeJsProjects/dsh-render
+   pnpm pack --pack-destination /tmp
+   ```
+
+2. 在目标机器安装（绝对路径或 tarball）：
+
+   ```text
+   plugin_manager action=install_bundle target=/path/to/dsh-render
+   ```
+
+3. 刷新 Web 页面；打开 Settings → 渲染，确认 Mermaid / ECharts 状态为「可用」。
+
+4. 可选：设置导航图标。在目标机器的 deepseek-harness checkout 中按 `docs/harness-client.patch` 打补丁，然后重建：
+
+   ```bash
+   pnpm --filter @deepseek-ai/dsh-client-ui-settings-general bundle
+   ```
+
+5. 可选：重新同步 vendor：`node scripts/sync-vendor.mjs`。
+
+**前提**：目标机器 DSH 版本满足 `engines.dsh`（`>=0.2.1-rc.2 <0.3.0`，与 0.2.1-rc.2 实测一致），并使用 Web profile。不满足时安装会以 `incompatible-version` 拒绝，而不是运行时静默失败。
+
 ## 使用
 
 让模型输出 Mermaid 围栏即可：

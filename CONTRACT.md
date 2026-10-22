@@ -12,6 +12,7 @@
 | 插件行 id | `dsh-render`（`cordis.patch.yml` 的 `- insert: - id: dsh-render`） |
 | Client 注入服务 | `slots`、`locale` |
 | 设置页 slot | `settings.section`，`id: 'render'`，`order: 31` |
+| DSH 兼容范围 | `engines.dsh: >=0.2.1-rc.2 <0.3.0`（0.2.1-rc.2 实测） |
 
 ## 2. 设置文档
 

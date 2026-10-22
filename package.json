@@ -22,8 +22,14 @@
     "README.md",
     "CONTRACT.md",
     "docs/DESIGN.md",
-    "docs/VENDOR.md"
+    "docs/VENDOR.md",
+    "docs/harness-client.patch",
+    "scripts/sync-vendor.mjs",
+    "test/*.js"
   ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node --check index.js client.js lib/*.js",
