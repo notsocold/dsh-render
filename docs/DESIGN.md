@@ -101,6 +101,10 @@ Web (client.js)
 
 - 护眼浅色主题：`ctx.theme.overrideTokens('dsh-render', { light, dark })` 叠加一层 token 覆盖，把浅色调色板的表面（页面底、侧栏、代码块、输入框、菜单等 28 个 token）从纯白换成暖白（默认 `#FCFCFB`），深色值原样回退宿主深色值；设置入口在「设置 → 通用 → 外观」下方一行，可调色、恢复推荐色或关回原生白。纯 CSS 变量覆盖，无额外样式表/observer/每帧成本。
 
+### 追加能力（0.2.8）
+
+- 行内 code 文字颜色：`appearance.inlineCodeColor`（`inherit | blue | red | custom`，默认 `blue`）与 `appearance.customInlineCodeColor`（默认图片取样色 `#8E2626`）；仅在 `inlineCode=claude` 风格下生成颜色规则，暗色模式对图片色/自定义色自动与白色混合提亮。设置页外观组新增「行内代码文字颜色」下拉与自定义取色器。
+
 ### 明确不做
 
 - PlantUML / Graphviz / D2；

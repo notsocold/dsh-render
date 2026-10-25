@@ -102,6 +102,8 @@ test('defaultSettings exposes the documented complete shape', () => {
       collapseUserMessages: true,
       userMessageMaxHeight: 360,
       lightBackground: '#FCFCFB',
+      inlineCodeColor: 'blue',
+      customInlineCodeColor: '#8E2626',
     },
     typography: {
       textFontFamily: '',
@@ -145,6 +147,8 @@ test('normalizeSettings deep-merges known fields and drops unknown ones', () => 
       collapseUserMessages: true,
       userMessageMaxHeight: 360,
       lightBackground: '#FCFCFB',
+      inlineCodeColor: 'blue',
+      customInlineCodeColor: '#8E2626',
     },
     typography: {
       textFontFamily: '',
@@ -933,4 +937,20 @@ test('normalizeSettings normalizes the light-theme background color', () => {
     '#EFEDE6',
     'a patch that omits the field keeps the previous value',
   )
+})
+
+test('normalizeSettings validates the inline-code text color', () => {
+  assert.equal(normalizeSettings({ appearance: { inlineCodeColor: 'red' } }).appearance.inlineCodeColor, 'red')
+  assert.equal(normalizeSettings({ appearance: { inlineCodeColor: 'inherit' } }).appearance.inlineCodeColor, 'inherit')
+  assert.equal(normalizeSettings({ appearance: { inlineCodeColor: 'purple' } }).appearance.inlineCodeColor, 'blue')
+  assert.equal(
+    normalizeSettings({ appearance: { customInlineCodeColor: '#abc' } }).appearance.customInlineCodeColor,
+    '#AABBCC',
+  )
+  assert.equal(
+    normalizeSettings({ appearance: { customInlineCodeColor: 'nope' } }).appearance.customInlineCodeColor,
+    '',
+  )
+  assert.equal(normalizeSettings({}).appearance.customInlineCodeColor, '#8E2626')
+  assert.equal(normalizeSettings({}).appearance.inlineCodeColor, 'blue')
 })

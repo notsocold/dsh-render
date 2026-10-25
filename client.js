@@ -70,6 +70,8 @@ window.__ModuleLoader__.load({
           collapseUserMessages: true,
           userMessageMaxHeight: 360,
           lightBackground: '#FCFCFB',
+          inlineCodeColor: 'blue',
+          customInlineCodeColor: '#8E2626',
         },
         typography: {
           textFontFamily: '',
@@ -299,6 +301,13 @@ window.__ModuleLoader__.load({
         if (typeof appearance.lightBackground === 'string') {
           next.appearance.lightBackground = normalizeLightBackground(appearance.lightBackground)
         }
+        if (typeof appearance.inlineCodeColor === 'string'
+          && ['inherit', 'blue', 'red', 'custom'].includes(appearance.inlineCodeColor)) {
+          next.appearance.inlineCodeColor = appearance.inlineCodeColor
+        }
+        if (typeof appearance.customInlineCodeColor === 'string') {
+          next.appearance.customInlineCodeColor = normalizeLightBackground(appearance.customInlineCodeColor)
+        }
       }
       if (isRecord(patch.typography)) {
         if (typeof patch.typography.textFontFamily === 'string') {
@@ -433,6 +442,15 @@ window.__ModuleLoader__.load({
       lightBackgroundDefault: '推荐色',
       lightBackgroundNative: 'DSH 原生白',
       lightBackgroundHostStale: '当前 dsh web 进程还没加载新代码，这个颜色暂时无法保存。请重启 dsh web 后再试。',
+      inlineCodeColor: '行内代码文字颜色',
+      inlineCodeColorHint: '「Claude 灰底蓝字描边」风格下生效；选「正常颜色」时文字跟随正文。',
+      inlineCodeColorInherit: '正常颜色',
+      inlineCodeColorBlue: '当前蓝色',
+      inlineCodeColorImage: '图片暗红',
+      inlineCodeColorCustom: '自定义',
+      customInlineCodeColor: '自定义文字颜色',
+      customInlineCodeColorHint: '输入 #RGB 或 #RRGGBB；暗色模式会自动提亮保持可读。',
+      saveNeedsRestart: '设置已应用，但当前 dsh web 进程还没加载新版本，新颜色需要重启 dsh web 后才会持久化。',
     }
 
     const en = {
@@ -538,6 +556,15 @@ window.__ModuleLoader__.load({
       lightBackgroundDefault: 'Recommended',
       lightBackgroundNative: 'Native white',
       lightBackgroundHostStale: 'The running dsh web process predates this setting, so the color could not be saved. Restart dsh web and try again.',
+      inlineCodeColor: 'Inline code color',
+      inlineCodeColorHint: 'Applies to the "Claude grey chip" style; "Normal" keeps the surrounding text color.',
+      inlineCodeColorInherit: 'Normal',
+      inlineCodeColorBlue: 'Current blue',
+      inlineCodeColorImage: 'Image dark red',
+      inlineCodeColorCustom: 'Custom',
+      customInlineCodeColor: 'Custom color',
+      customInlineCodeColorHint: 'Enter #RGB or #RRGGBB; dark mode lightens it automatically.',
+      saveNeedsRestart: 'Applied, but the running dsh web process predates this build: restart dsh web to persist the new color.',
     }
 
     let dictionaries = { zh, en }
@@ -2716,6 +2743,32 @@ window.__ModuleLoader__.load({
       return CODE_FONT_STACKS[appearance.codeFont] ?? CODE_FONT_STACKS.inherit
     }
 
+    /** Inline-code text color sampled from the user's screenshot (chip stays the Claude grey). */
+    const INLINE_CODE_IMAGE_COLOR = '#8E2626'
+
+    /**
+     * Resolve the inline-code text colors for one appearance snapshot.
+     * `null` means "keep the inherited text color" (the inherit choice).
+     * Custom / image colors get a white mix for the dark scheme so they stay
+     * legible on the dark chip.
+     * @param {Record<string, any>} appearance - normalized appearance settings.
+     * @returns {{ light: string, dark: string } | null}
+     */
+    function inlineCodeTextColors(appearance) {
+      const choice = appearance.inlineCodeColor
+      if (choice === 'inherit') return null
+      if (choice === 'red') {
+        return { light: INLINE_CODE_IMAGE_COLOR, dark: 'color-mix(in srgb, ' + INLINE_CODE_IMAGE_COLOR + ' 58%, #ffffff 42%)' }
+      }
+      if (choice === 'custom') {
+        const custom = normalizeLightBackground(appearance.customInlineCodeColor)
+        if (custom !== '') {
+          return { light: custom, dark: 'color-mix(in srgb, ' + custom + ' 58%, #ffffff 42%)' }
+        }
+      }
+      return { light: 'color-mix(in srgb, var(--dsw-alias-link) 84%, #000 16%)', dark: 'var(--dsw-alias-link)' }
+    }
+
     /**
      * Build the Markdown appearance layer. Every selector is scoped to the
      * transcript or the document preview, so settings pages and plugin UI keep
@@ -2758,10 +2811,17 @@ window.__ModuleLoader__.load({
       ]
       if (appearance.inlineCode === 'claude') {
         rules.push(
-          scopes + ' :not(pre) > code { color:color-mix(in srgb, var(--dsw-alias-link) 84%, #000 16%) !important; background:rgba(0,0,0,.055) !important; border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.38)) !important; border-radius:4px !important; padding:0.1em 0.35em !important; font-weight:400 !important; }',
-          'body[data-ds-dark-theme] ' + scopes + ' :not(pre) > code { color:var(--dsw-alias-link) !important; background:rgba(255,255,255,.09) !important; }',
+          scopes + ' :not(pre) > code { background:rgba(0,0,0,.055) !important; border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.38)) !important; border-radius:4px !important; padding:0.1em 0.35em !important; font-weight:400 !important; }',
+          'body[data-ds-dark-theme] ' + scopes + ' :not(pre) > code { background:rgba(255,255,255,.09) !important; }',
           scopes + ' pre code { color:inherit !important; background:transparent !important; border:0 !important; padding:0 !important; border-radius:0 !important; font-weight:inherit !important; }',
         )
+        const inlineColors = inlineCodeTextColors(appearance)
+        if (inlineColors !== null) {
+          rules.push(
+            scopes + ' :not(pre) > code { color:' + inlineColors.light + ' !important; }',
+            'body[data-ds-dark-theme] ' + scopes + ' :not(pre) > code { color:' + inlineColors.dark + ' !important; }',
+          )
+        }
       }
       if (appearance.codeBlock === 'claude' || appearance.codeBlock === 'minimal') {
         rules.push(
@@ -3171,7 +3231,15 @@ window.__ModuleLoader__.load({
           runtime.settings = settings
           applySettings(settings)
           writeCachedSettings(settings)
-          setNotice({ kind: 'success', text: translate('saved') })
+          // The Host normalizer drops fields it does not know; detect that
+          // case instead of claiming a save that a restart would lose.
+          const hostAppearance = isRecord(payload.value.settings?.appearance)
+            ? payload.value.settings.appearance
+            : {}
+          const hostKnowsInlineColor = Object.hasOwn(hostAppearance, 'inlineCodeColor')
+          setNotice(hostKnowsInlineColor
+            ? { kind: 'success', text: translate('saved') }
+            : { kind: 'error', text: translate('saveNeedsRestart') })
         } catch (cause) {
           setNotice({ kind: 'error', text: translate('saveFailed') + ': ' + messageOf(cause) })
         } finally {
@@ -3247,6 +3315,36 @@ window.__ModuleLoader__.load({
             },
             h('option', { value: 'claude' }, translate('inlineStyleClaude')),
             h('option', { value: 'dsh' }, translate('inlineStyleDsh')))),
+          settingRow(translate('inlineCodeColor'), translate('inlineCodeColorHint'),
+            h('select', {
+              className: 'dshrender-select', value: settings.appearance.inlineCodeColor,
+              onChange: event => { setAppearance({ inlineCodeColor: event.target.value }) },
+            },
+            h('option', { value: 'inherit' }, translate('inlineCodeColorInherit')),
+            h('option', { value: 'blue' }, translate('inlineCodeColorBlue')),
+            h('option', { value: 'red' }, translate('inlineCodeColorImage')),
+            h('option', { value: 'custom' }, translate('inlineCodeColorCustom')))),
+          settings.appearance.inlineCodeColor === 'custom'
+            ? settingRow(translate('customInlineCodeColor'), translate('customInlineCodeColorHint'),
+              h('div', { className: 'dshrender-general-control' },
+                h('input', {
+                  className: 'dshrender-color', type: 'color',
+                  value: normalizeLightBackground(settings.appearance.customInlineCodeColor) || '#8E2626',
+                  'aria-label': translate('customInlineCodeColor'),
+                  onChange: event => { setAppearance({ customInlineCodeColor: event.target.value.toUpperCase() }) },
+                }),
+                h('input', {
+                  className: 'dshrender-input dshrender-color-text', type: 'text', spellCheck: false,
+                  value: settings.appearance.customInlineCodeColor,
+                  'aria-label': translate('customInlineCodeColor'),
+                  onChange: event => { setAppearance({ customInlineCodeColor: event.target.value }) },
+                  onBlur: () => {
+                    setAppearance({
+                      customInlineCodeColor: normalizeLightBackground(settings.appearance.customInlineCodeColor) || '#8E2626',
+                    })
+                  },
+                })))
+            : null,
           settingRow(translate('codeBlockStyle'), null,
             h('select', {
               className: 'dshrender-select', value: settings.appearance.codeBlock,
@@ -3603,6 +3701,7 @@ window.__ModuleLoader__.load({
         clampZoom, appearanceCss, cleanCustomFont, clampUserMessageMaxHeight, shouldCollapseUserMessage,
         clampUiScale, parseKeywordLines, normalizeLightBackground, buildLightThemeOverrides,
         shadeLightColor, LIGHT_THEME_TOKENS, LIGHT_BACKGROUND_DEFAULT,
+        inlineCodeTextColors, INLINE_CODE_IMAGE_COLOR,
       }
     }
 

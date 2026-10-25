@@ -485,3 +485,70 @@ test('apply keeps the local color when the running Host predates the setting', a
   assert.equal(last.tokens['--dsw-alias-bg-base'].light, '#FCFCFB')
   assert.equal(last.tokens['--dsw-specific-sidebar-fill'].light, '#F6F6F5')
 })
+
+test('mergeSettings normalizes the inline-code text color', () => {
+  const defaults = helpers.defaultSettings()
+  assert.equal(defaults.appearance.inlineCodeColor, 'blue')
+  assert.equal(defaults.appearance.customInlineCodeColor, '#8E2626')
+  const merged = helpers.mergeSettings({
+    appearance: { inlineCodeColor: 'red', customInlineCodeColor: '#abc' },
+  }, defaults)
+  assert.equal(merged.appearance.inlineCodeColor, 'red')
+  assert.equal(merged.appearance.customInlineCodeColor, '#AABBCC')
+  const invalid = helpers.mergeSettings({
+    appearance: { inlineCodeColor: 'purple', customInlineCodeColor: 'nope' },
+  }, defaults)
+  assert.equal(invalid.appearance.inlineCodeColor, 'blue', 'unknown choices keep the base value')
+  assert.equal(invalid.appearance.customInlineCodeColor, '', 'invalid custom colors normalize to empty')
+})
+
+test('inlineCodeTextColors resolves the four inline-code color choices', () => {
+  const defaults = helpers.defaultSettings()
+  assert.equal(
+    helpers.inlineCodeTextColors(defaults.appearance).light,
+    'color-mix(in srgb, var(--dsw-alias-link) 84%, #000 16%)',
+  )
+  assert.equal(helpers.inlineCodeTextColors({ ...defaults.appearance, inlineCodeColor: 'inherit' }), null)
+  const red = helpers.inlineCodeTextColors({ ...defaults.appearance, inlineCodeColor: 'red' })
+  assert.equal(red.light, '#8E2626')
+  assert.equal(red.dark, 'color-mix(in srgb, #8E2626 58%, #ffffff 42%)')
+  const custom = helpers.inlineCodeTextColors({
+    ...defaults.appearance,
+    inlineCodeColor: 'custom',
+    customInlineCodeColor: '#336699',
+  })
+  assert.equal(custom.light, '#336699')
+  assert.match(custom.dark, /#336699 58%/)
+  const fallback = helpers.inlineCodeTextColors({
+    ...defaults.appearance,
+    inlineCodeColor: 'custom',
+    customInlineCodeColor: 'nope',
+  })
+  assert.equal(fallback.light, 'color-mix(in srgb, var(--dsw-alias-link) 84%, #000 16%)', 'empty custom falls back to blue')
+})
+
+test('appearanceCss applies the selected inline-code text color', () => {
+  const defaults = helpers.defaultSettings()
+  const blue = helpers.appearanceCss(defaults)
+  assert.match(blue, /:not\(pre\) > code \{ color:color-mix\(in srgb, var\(--dsw-alias-link\) 84%, #000 16%\) !important; \}/)
+  assert.match(blue, /background:rgba\(0,0,0,\.055\)/)
+
+  const red = helpers.appearanceCss(helpers.mergeSettings({ appearance: { inlineCodeColor: 'red' } }, defaults))
+  assert.match(red, /:not\(pre\) > code \{ color:#8E2626 !important; \}/)
+  assert.match(red, /color:color-mix\(in srgb, #8E2626 58%, #ffffff 42%\) !important/)
+
+  const inherit = helpers.appearanceCss(helpers.mergeSettings({ appearance: { inlineCodeColor: 'inherit' } }, defaults))
+  assert.doesNotMatch(inherit, /:not\(pre\) > code \{ color:/)
+  assert.match(inherit, /background:rgba\(0,0,0,\.055\)/, 'the chip itself stays Claude grey')
+
+  const custom = helpers.appearanceCss(helpers.mergeSettings({
+    appearance: { inlineCodeColor: 'custom', customInlineCodeColor: '#336699' },
+  }, defaults))
+  assert.match(custom, /:not\(pre\) > code \{ color:#336699 !important; \}/)
+  assert.match(custom, /color-mix\(in srgb, #336699 58%, #ffffff 42%\)/)
+
+  const fallback = helpers.appearanceCss(helpers.mergeSettings({
+    appearance: { inlineCodeColor: 'custom', customInlineCodeColor: 'nope' },
+  }, defaults))
+  assert.match(fallback, /color:color-mix\(in srgb, var\(--dsw-alias-link\) 84%/)
+})
