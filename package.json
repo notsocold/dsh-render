@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-render",
-  "version": "0.2.5",
+  "version": "0.2.7",
   "private": true,
   "description": "Rich rendering for DeepSeek Harness: Mermaid diagrams, ECharts charts, and CSV tables rendered from fenced code blocks, with a Render settings page.",
   "type": "module",

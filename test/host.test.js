@@ -101,6 +101,7 @@ test('defaultSettings exposes the documented complete shape', () => {
       codeLigatures: false,
       collapseUserMessages: true,
       userMessageMaxHeight: 360,
+      lightBackground: '#FCFCFB',
     },
     typography: {
       textFontFamily: '',
@@ -143,6 +144,7 @@ test('normalizeSettings deep-merges known fields and drops unknown ones', () => 
       codeLigatures: false,
       collapseUserMessages: true,
       userMessageMaxHeight: 360,
+      lightBackground: '#FCFCFB',
     },
     typography: {
       textFontFamily: '',
@@ -900,4 +902,35 @@ test('prompt section is dynamic and emits nothing while disabled', () => {
 
   settingsStore.settings = defaultSettings()
   assert.equal(registered.text({}), '')
+})
+
+test('normalizeSettings normalizes the light-theme background color', () => {
+  assert.equal(
+    normalizeSettings({ appearance: { lightBackground: '#f6f5f1' } }).appearance.lightBackground,
+    '#F6F5F1',
+  )
+  assert.equal(
+    normalizeSettings({ appearance: { lightBackground: ' #FFF ' } }).appearance.lightBackground,
+    '#FFFFFF',
+  )
+  assert.equal(
+    normalizeSettings({ appearance: { lightBackground: 'red' } }).appearance.lightBackground,
+    '',
+    'invalid colors disable the override instead of keeping a broken value',
+  )
+  assert.equal(
+    normalizeSettings({ appearance: { lightBackground: '' } }).appearance.lightBackground,
+    '',
+  )
+  assert.equal(
+    normalizeSettings({ appearance: { lightBackground: 42 } }).appearance.lightBackground,
+    '#FCFCFB',
+    'non-string values keep the base value',
+  )
+  const base = normalizeSettings({ appearance: { lightBackground: '#EFEDE6' } })
+  assert.equal(
+    normalizeSettings({ appearance: { table: 'dsh' } }, base).appearance.lightBackground,
+    '#EFEDE6',
+    'a patch that omits the field keeps the previous value',
+  )
 })

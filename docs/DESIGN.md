@@ -74,6 +74,7 @@ Web (client.js)
   ├── 加载器           Mermaid ESM 动态 import、ECharts UMD script
   ├── 渲染器           mermaid.render() / echarts.renderToSVGString() / CSV 表格
   ├── DOM 增强         MutationObserver + 在 .md-code-block 内插入 surface
+  ├── 主题桥           ctx.theme.overrideTokens（浅色调色板覆盖层）
   └── 交互             源码切换、复制、下载 SVG、全屏、重试
 ```
 
@@ -95,6 +96,10 @@ Web (client.js)
 ### P1（本次交付）
 
 - Render 设置页：Mermaid/ECharts/CSV 开关、Mermaid 主题、流式延迟、最大源码长度、启发式开关、额外关键字、模型提示开关、vendor 状态、保存/恢复默认/重新读取。
+
+### 追加能力（0.2.6）
+
+- 护眼浅色主题：`ctx.theme.overrideTokens('dsh-render', { light, dark })` 叠加一层 token 覆盖，把浅色调色板的表面（页面底、侧栏、代码块、输入框、菜单等 28 个 token）从纯白换成暖白（默认 `#FCFCFB`），深色值原样回退宿主深色值；设置入口在「设置 → 通用 → 外观」下方一行，可调色、恢复推荐色或关回原生白。纯 CSS 变量覆盖，无额外样式表/observer/每帧成本。
 
 ### 明确不做
 
@@ -145,11 +150,12 @@ Host 路由（全部 `ctx.connection.fetch.register`，认证同源）：
   "echarts": { "enabled": true },
   "csv": { "enabled": true },
   "detection": { "heuristic": true, "extraKeywords": [] },
-  "prompt": { "enabled": false }
+  "prompt": { "enabled": false },
+  "appearance": { "lightBackground": "#FCFCFB" }
 }
 ```
 
-设置页通过 `settings.section`（id=`render`，order=31）注册；保存后：
+浅色主题颜色通过 `settings.general.item`（id=`dsh-render-light-background`，order=12）注册到「设置 → 通用」页，与宿主的 Appearance（10）、字号（11）行同列；保存后：
 1. Host 写 `$DSH_HOME/dsh-render/settings.json`；
 2. 客户端立即更新内存设置、重扫页面、重渲染受影响的块；
 3. 模型提示段随设置动态生效（下一次提示装配）。

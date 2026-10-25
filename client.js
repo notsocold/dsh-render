@@ -44,6 +44,9 @@ window.__ModuleLoader__.load({
     const ECHARTS_HEIGHT = 360
     const CACHE_LIMIT = 60
 
+    /** `ctx.theme.overrideTokens` layer identity; the service keeps one layer per source. */
+    const THEME_TOKEN_SOURCE = 'dsh-render'
+
     /* ------------------------------ settings ------------------------------ */
 
     /** Default settings mirror `lib/settings.js`; used before `/state` answers. */
@@ -66,6 +69,7 @@ window.__ModuleLoader__.load({
           codeLigatures: false,
           collapseUserMessages: true,
           userMessageMaxHeight: 360,
+          lightBackground: '#FCFCFB',
         },
         typography: {
           textFontFamily: '',
@@ -89,6 +93,128 @@ window.__ModuleLoader__.load({
         .replace(/[;{}<>\\]/g, '')
         .trim()
         .slice(0, 200)
+    }
+
+    /** Default light-theme surface color; mirrors `lib/settings.js`. */
+    const LIGHT_BACKGROUND_DEFAULT = '#FCFCFB'
+
+    /**
+     * Normalize one light-theme background color exactly like the Host does.
+     * Accepts `#RGB` / `#RRGGBB` (leading `#` optional) and returns the
+     * canonical upper-case `#RRGGBB`; anything else maps to `''`, which keeps
+     * the stock light palette (no override layer is registered).
+     * @param {unknown} value - raw color value.
+     * @returns {string} canonical color or `''`.
+     */
+    function normalizeLightBackground(value) {
+      if (typeof value !== 'string') return ''
+      const match = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(value.trim())
+      if (match === null) return ''
+      let hex = match[1]
+      if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2]
+      return '#' + hex.toUpperCase()
+    }
+
+    /**
+     * Parse one canonical `#RRGGBB` value into channels; `null` when the input
+     * is not a six-digit hex color.
+     * @param {unknown} value - canonical color.
+     * @returns {[number, number, number] | null}
+     */
+    function parseHexChannels(value) {
+      if (typeof value !== 'string') return null
+      const match = /^#([0-9a-fA-F]{6})$/.exec(value.trim())
+      if (match === null) return null
+      return [
+        Number.parseInt(match[1].slice(0, 2), 16),
+        Number.parseInt(match[1].slice(2, 4), 16),
+        Number.parseInt(match[1].slice(4, 6), 16),
+      ]
+    }
+
+    /**
+     * @param {readonly number[]} channels - three channels.
+     * @returns {string} canonical `#RRGGBB`.
+     */
+    function channelsToHex(channels) {
+      return '#' + channels
+        .map(channel => Math.min(255, Math.max(0, Math.round(channel))).toString(16).padStart(2, '0'))
+        .join('')
+        .toUpperCase()
+    }
+
+    /** Lowest channel value kept in the light palette so text stays readable. */
+    const LIGHT_BACKGROUND_MIN_CHANNEL = 200
+
+    /**
+     * Darken one light-palette color by an absolute per-channel delta. The
+     * channel floor keeps a custom color from ever turning the light palette
+     * into something that breaks label contrast.
+     * @param {string} hex - canonical source color.
+     * @param {number} delta - channels to subtract.
+     * @returns {string} canonical darkened color.
+     */
+    function shadeLightColor(hex, delta) {
+      const channels = parseHexChannels(hex)
+      if (channels === null) return hex
+      return channelsToHex(channels.map(channel => Math.max(LIGHT_BACKGROUND_MIN_CHANNEL, channel - delta)))
+    }
+
+    /**
+     * Alias tokens the plugin restacks for the light palette. The third field
+     * is the stock dark-palette value repeated as a `var()` fallback, so the
+     * dark scheme keeps rendering exactly like the stock theme and a future
+     * Host palette rename still degrades gracefully.
+     */
+    const LIGHT_THEME_TOKENS = [
+      ['--dsw-alias-bg-base', 0, 'var(--dsw-static-neutral-bluish-950, rgb(21, 21, 23))'],
+      ['--dsw-alias-bg-layer-1', 0, 'var(--dsw-static-neutral-bluish-875, rgb(35, 35, 36))'],
+      ['--dsw-alias-bg-layer-2', 0, 'var(--dsw-static-neutral-bluish-850, rgb(44, 44, 46))'],
+      ['--dsw-alias-bg-layer-3', 0, 'var(--dsw-static-neutral-bluish-800, rgb(53, 54, 56))'],
+      ['--dsw-specific-sidebar-fill', 6, 'var(--dsw-static-neutral-bluish-900, rgb(27, 27, 28))'],
+      ['--dsw-specific-input-major', 0, 'var(--dsw-static-neutral-bluish-850, rgb(44, 44, 46))'],
+      ['--dsw-alias-markdown-code-block', 6, 'var(--dsw-static-neutral-bluish-900, rgb(27, 27, 28))'],
+      ['--dsw-alias-markdown-code-block-banner', 6, 'var(--dsw-static-neutral-bluish-850, rgb(44, 44, 46))'],
+      ['--dsw-alias-markdown-code-segment-selected', 0, 'var(--dsw-static-neutral-bluish-800, rgb(53, 54, 56))'],
+      ['--dsw-alias-markdown-code-segment-unselected', 14, 'var(--dsw-static-neutral-bluish-900, rgb(27, 27, 28))'],
+      ['--dsw-alias-markdown-inline-code', 5, 'var(--dsw-static-neutral-800, rgb(41, 41, 41))'],
+      ['--dsw-alias-markdown-citation', 20, 'var(--dsw-static-neutral-bluish-800, rgb(53, 54, 56))'],
+      ['--dsw-alias-markdown-tag', 14, 'var(--dsw-static-neutral-bluish-850, rgb(44, 44, 46))'],
+      ['--dsw-alias-markdown-placeholder', 10, 'var(--dsw-static-neutral-bluish-850, rgb(44, 44, 46))'],
+      ['--dsw-alias-bg-document-preview', 20, 'var(--dsw-static-neutral-bluish-950, rgb(21, 21, 23))'],
+      ['--dsw-alias-bg-overlay', 22, 'var(--dsw-static-neutral-bluish-700, rgb(97, 102, 107))'],
+      ['--dsw-specific-selector', 10, 'var(--dsw-static-neutral-bluish-800, rgb(53, 54, 56))'],
+      ['--dsw-specific-tip', 10, 'var(--dsw-static-neutral-bluish-800, rgb(53, 54, 56))'],
+      ['--dsw-alias-bg-module-platform', 10, 'var(--dsw-static-neutral-bluish-800, rgb(53, 54, 56))'],
+      ['--dsw-alias-bg-multi-select', 10, 'var(--dsw-static-neutral-850, rgb(33, 33, 35))'],
+      ['--dsw-specific-login-input', 6, 'var(--dsw-static-neutral-bluish-900, rgb(27, 27, 28))'],
+      ['--dsw-specific-sidebar-nav-item-active', 20, 'var(--dsw-static-neutral-bluish-750, rgb(67, 69, 74))'],
+      ['--dsw-alias-button-elevated-fill', 0, 'var(--dsw-static-neutral-bluish-750, rgb(67, 69, 74))'],
+      ['--dsw-alias-button-floating-fill', 0, 'var(--dsw-static-neutral-bluish-850, rgb(44, 44, 46))'],
+      ['--dsw-alias-button-floating-hover', 14, 'var(--dsw-static-neutral-bluish-800, rgb(53, 54, 56))'],
+      ['--dsw-alias-button-primary-dimmed', 20, 'var(--dsw-static-neutral-bluish-750, rgb(67, 69, 74))'],
+      ['--dsw-alias-button-ghost-active-fill', 20, 'var(--dsw-static-neutral-bluish-750, rgb(67, 69, 74))'],
+      ['--dsw-alias-button-ghost-active-hover', 22, 'var(--dsw-static-neutral-bluish-700, rgb(97, 102, 107))'],
+    ]
+
+    /**
+     * Build the `ctx.theme.overrideTokens` layer for one light background
+     * color: every token gets the shaded light value plus the stock dark
+     * value, so switching to the dark scheme renders exactly like stock.
+     * @param {unknown} value - configured color (`''` disables the layer).
+     * @returns {Record<string, { light: string, dark: string }> | null}
+     */
+    function buildLightThemeOverrides(value) {
+      const normalized = normalizeLightBackground(value)
+      if (normalized === '') return null
+      // Clamp the base itself first, then shade: one bad pick cannot push the
+      // whole palette below the readable floor.
+      const base = shadeLightColor(normalized, 0)
+      const overrides = {}
+      for (const [token, delta, dark] of LIGHT_THEME_TOKENS) {
+        overrides[token] = { light: shadeLightColor(base, delta), dark }
+      }
+      return overrides
     }
 
     /**
@@ -169,6 +295,9 @@ window.__ModuleLoader__.load({
         if (typeof appearance.collapseUserMessages === 'boolean') next.appearance.collapseUserMessages = appearance.collapseUserMessages
         if (typeof appearance.userMessageMaxHeight === 'number' && Number.isFinite(appearance.userMessageMaxHeight)) {
           next.appearance.userMessageMaxHeight = Math.min(800, Math.max(160, Math.round(appearance.userMessageMaxHeight)))
+        }
+        if (typeof appearance.lightBackground === 'string') {
+          next.appearance.lightBackground = normalizeLightBackground(appearance.lightBackground)
         }
       }
       if (isRecord(patch.typography)) {
@@ -297,6 +426,13 @@ window.__ModuleLoader__.load({
       userMessageMaxHeightHint: '160–800px，默认 360px。',
       expandMore: '展开更多',
       showLess: '收起',
+      lightBackground: '浅色主题颜色',
+      lightBackgroundHint: '「设置 → 通用 → 外观」选择浅色时，整个界面的底色使用该颜色；跟随系统且系统为浅色时同样生效，深色模式不受影响。',
+      lightBackgroundSaved: '已保存',
+      lightBackgroundInvalid: '请输入 #RGB 或 #RRGGBB',
+      lightBackgroundDefault: '推荐色',
+      lightBackgroundNative: 'DSH 原生白',
+      lightBackgroundHostStale: '当前 dsh web 进程还没加载新代码，这个颜色暂时无法保存。请重启 dsh web 后再试。',
     }
 
     const en = {
@@ -395,6 +531,13 @@ window.__ModuleLoader__.load({
       userMessageMaxHeightHint: '160–800 px, default 360 px.',
       expandMore: 'Show more',
       showLess: 'Show less',
+      lightBackground: 'Light theme color',
+      lightBackgroundHint: 'Used as the interface background while Appearance is set to Light (and while System resolves to light). Dark mode is untouched.',
+      lightBackgroundSaved: 'Saved',
+      lightBackgroundInvalid: 'Enter #RGB or #RRGGBB',
+      lightBackgroundDefault: 'Recommended',
+      lightBackgroundNative: 'Native white',
+      lightBackgroundHostStale: 'The running dsh web process predates this setting, so the color could not be saved. Restart dsh web and try again.',
     }
 
     let dictionaries = { zh, en }
@@ -2367,6 +2510,84 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------ settings runtime ------------------------------ */
 
+    /** Theme service scope; installed once the optional `theme` service resolves. */
+    let themeScoped = null
+    /** Disposer for the currently stacked override layer (null while none is up). */
+    let themeOverrideDispose = null
+
+    /** Drop the stacked override layer, if any. @returns {void} */
+    function disposeThemeOverride() {
+      if (themeOverrideDispose === null) return
+      try {
+        themeOverrideDispose()
+      } catch {
+        // Teardown is best-effort.
+      }
+      themeOverrideDispose = null
+    }
+
+    /**
+     * Keep the stacked light-palette override in sync with the settings. The
+     * theme service folds override layers into its snapshot and ui-layout's
+     * presenter writes them as inline CSS variables on `<body>`, so a change
+     * costs one handful of custom-property writes and no stylesheet, observer,
+     * or per-frame work. Re-registering the same source replaces the layer in
+     * place (one `theme/change`), which is why previews stay cheap.
+     * @returns {void}
+     */
+    function syncThemeOverrides() {
+      if (themeScoped === null) return
+      const overrides = buildLightThemeOverrides(runtime.settings?.appearance?.lightBackground)
+      if (overrides === null) {
+        disposeThemeOverride()
+        return
+      }
+      try {
+        themeOverrideDispose = themeScoped.theme.overrideTokens(THEME_TOKEN_SOURCE, overrides)
+      } catch (cause) {
+        // A Host theme service from an older build can reject the layer; the
+        // stock palette is an acceptable degradation, never a plugin failure.
+        themeOverrideDispose = null
+        try {
+          console.warn('dsh-render: light theme override rejected: ' + messageOf(cause))
+        } catch {
+          // Logging is best-effort.
+        }
+      }
+    }
+
+    /**
+     * Install the light-palette override once the optional theme service is
+     * available. Profiles without that service (older Hosts, headless runs)
+     * keep the stock palette and lose nothing else.
+     * @param {Record<string, any>} ctx - client context.
+     * @returns {void}
+     */
+    function installThemeBridge(ctx) {
+      if (typeof ctx.inject !== 'function') return
+      try {
+        ctx.inject(['theme'], scoped => {
+          themeScoped = scoped
+          scoped.effect(() => {
+            syncThemeOverrides()
+            return () => {
+              disposeThemeOverride()
+              themeScoped = null
+            }
+          }, 'dsh-render: light theme tokens')
+        })
+      } catch (cause) {
+        // The bridge is an enhancement: a Host without the theme service (or
+        // with an incompatible one) keeps the stock palette and every other
+        // feature intact.
+        try {
+          console.warn('dsh-render: theme bridge unavailable: ' + messageOf(cause))
+        } catch {
+          // Logging is best-effort.
+        }
+      }
+    }
+
     /**
      * Apply a new settings snapshot: refresh labels, drop disabled surfaces, and
      * re-evaluate every code block on the page.
@@ -2393,6 +2614,9 @@ window.__ModuleLoader__.load({
       resetUserMessages()
       scanUserMessages(document)
       applyStyles(next)
+      // Palette tokens feed the Mermaid/ECharts variables as well, so the layer
+      // must be current before the re-render queued above runs.
+      syncThemeOverrides()
     }
 
     /**
@@ -2441,7 +2665,7 @@ window.__ModuleLoader__.load({
         if (!response.ok) throw new Error('state request failed: ' + response.status)
         const payload = await response.json()
         if (payload?.ok !== true || !isRecord(payload.value)) throw new Error('state payload is malformed')
-        return mergeSettings(payload.value.settings, defaultSettings())
+        return mergeSettings(payload.value.settings, runtime.settings)
       } catch (cause) {
         try {
           console.warn('dsh-render: settings unavailable: ' + messageOf(cause))
@@ -2674,7 +2898,194 @@ window.__ModuleLoader__.load({
         '.dshrender-user-collapsed{max-height:var(--dshrender-user-max-height,360px);overflow:hidden;-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 56px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 56px),transparent);}',
         '.dshrender-user-toggle{align-self:flex-end;display:inline-flex;align-items:center;margin:4px 0 0;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#555);font:inherit;font-size:12px;line-height:18px;padding:2px 8px;border-radius:var(--dsw-radius-xs,4px);cursor:pointer;}',
         '.dshrender-user-toggle:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,#111);}',
+        '.dshrender-general-row{display:flex;align-items:center;gap:16px;padding:16px 0;border-bottom:0.5px solid var(--dsw-alias-border-l2,rgba(127,127,127,.24));}',
+        '.dshrender-general-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}',
+        '.dshrender-general-title{font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary,#111);}',
+        '.dshrender-general-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#888);}',
+        '.dshrender-general-hint[data-kind="error"]{color:var(--dsw-alias-state-error-primary,#c0392b);}',
+        '.dshrender-general-hint[data-kind="success"]{color:var(--dsw-alias-state-success-primary,#2e7d32);}',
+        '.dshrender-general-control{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;}',
+        '.dshrender-color{width:36px;height:36px;padding:0;border:0.5px solid var(--dsw-alias-border-l2,rgba(127,127,127,.4));border-radius:10px;background:transparent;cursor:pointer;}',
+        '.dshrender-color::-webkit-color-swatch-wrapper{padding:3px;}',
+        '.dshrender-color::-webkit-color-swatch{border:0;border-radius:7px;}',
+        '.dshrender-color-text{width:96px;text-transform:uppercase;font-family:var(--ds-font-family-code, monospace);}',
       ].join('\n')
+    }
+
+    /* ------------------------------ general settings row ------------------------------ */
+
+    /**
+     * `settings.general.item` row: the light-theme surface color. A new pick
+     * previews instantly by restacking the theme override layer; the value is
+     * persisted through the plugin's own settings action. Previewing never
+     * re-renders the transcript; the save does, because the palette feeds the
+     * Mermaid/ECharts theme variables.
+     * @returns {import('react').ReactNode}
+     */
+    function LightBackgroundRow() {
+      const initial = normalizeLightBackground(runtime.settings?.appearance?.lightBackground)
+      const [draft, setDraft] = useState(initial)
+      const [notice, setNotice] = useState(null)
+      const [busy, setBusy] = useState(false)
+      const saveTimer = useRef(0)
+
+      // Adopt the Host document when the row mounts: the startup read may have
+      // raced this settings page, and another tab may have saved meanwhile.
+      useEffect(() => {
+        let cancelled = false
+        void fetchSettings().then(settings => {
+          if (cancelled || settings === null) return
+          const next = normalizeLightBackground(settings.appearance?.lightBackground)
+          const current = normalizeLightBackground(runtime.settings?.appearance?.lightBackground)
+          if (next !== current) {
+            runtime.settings = {
+              ...runtime.settings,
+              appearance: { ...runtime.settings.appearance, lightBackground: next },
+            }
+            syncThemeOverrides()
+          }
+          setDraft(next)
+        })
+        return () => {
+          cancelled = true
+          if (saveTimer.current !== 0) {
+            clearTimeout(saveTimer.current)
+            saveTimer.current = 0
+          }
+        }
+      }, [])
+
+      /**
+       * Restack the override layer for a candidate color without touching the
+       * transcript or the Host document.
+       * @param {string} raw - candidate color.
+       * @returns {string} canonical color.
+       */
+      const preview = useCallback(raw => {
+        const canonical = normalizeLightBackground(raw)
+        setDraft(canonical)
+        setNotice(null)
+        runtime.settings = {
+          ...runtime.settings,
+          appearance: { ...runtime.settings.appearance, lightBackground: canonical },
+        }
+        syncThemeOverrides()
+        return canonical
+      }, [])
+
+      /**
+       * Persist one color, then re-apply the accepted document (the palette
+       * feeds the diagram themes, so the transcript is re-rendered here, not
+       * on every preview).
+       * @param {string} raw - candidate color.
+       * @returns {Promise<void>}
+       */
+      const commit = useCallback(async raw => {
+        const canonical = preview(raw)
+        const settings = mergeSettings({ appearance: { lightBackground: canonical } }, runtime.settings)
+        setBusy(true)
+        try {
+          const response = await fetch(API_ACTION, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify({ settings }),
+          })
+          if (!response.ok) throw new Error('HTTP ' + response.status)
+          const payload = await response.json()
+          if (payload?.ok !== true || !isRecord(payload.value)) throw new Error('malformed action response')
+          const saved = mergeSettings(payload.value.settings, runtime.settings)
+          applySettings(saved)
+          writeCachedSettings(saved)
+          setDraft(normalizeLightBackground(saved.appearance?.lightBackground))
+          // A Host process started before this setting existed drops unknown
+          // fields while normalizing. Keep the local pick (already applied) and
+          // say a restart is required instead of silently snapping back to the
+          // recommended color on the next round trip.
+          const persisted = isRecord(payload.value.settings)
+            && isRecord(payload.value.settings.appearance)
+            && Object.hasOwn(payload.value.settings.appearance, 'lightBackground')
+            && normalizeLightBackground(payload.value.settings.appearance.lightBackground) === canonical
+          setNotice(persisted
+            ? { kind: 'success', text: translate('lightBackgroundSaved') }
+            : { kind: 'error', text: translate('lightBackgroundHostStale') })
+        } catch (cause) {
+          setNotice({ kind: 'error', text: translate('saveFailed') })
+          try {
+            console.warn('dsh-render: light background save failed: ' + messageOf(cause))
+          } catch {
+            // Logging is best-effort.
+          }
+        } finally {
+          setBusy(false)
+        }
+      }, [preview])
+
+      // Dragging inside the native color picker fires continuously: preview on
+      // every tick, persist once the picker rests for half a second.
+      const scheduleCommit = useCallback(raw => {
+        preview(raw)
+        if (saveTimer.current !== 0) clearTimeout(saveTimer.current)
+        saveTimer.current = setTimeout(() => {
+          saveTimer.current = 0
+          void commit(raw)
+        }, 500)
+      }, [commit, preview])
+
+      const commitDraft = useCallback(() => {
+        if (draft.trim() !== '' && normalizeLightBackground(draft) === '') {
+          setNotice({ kind: 'error', text: translate('lightBackgroundInvalid') })
+          return
+        }
+        void commit(draft)
+      }, [commit, draft])
+
+      // `input[type=color]` only accepts a canonical #rrggbb value, so fall
+      // back to the recommended color while the override is off or the text
+      // field holds an unfinished edit.
+      const pickerValue = normalizeLightBackground(draft) || LIGHT_BACKGROUND_DEFAULT
+      return h('div', { className: 'dshrender-general-row' },
+        h('div', { className: 'dshrender-general-copy' },
+          h('span', { className: 'dshrender-general-title' }, translate('lightBackground')),
+          notice === null
+            ? h('span', { className: 'dshrender-general-hint' }, translate('lightBackgroundHint'))
+            : h('span', { className: 'dshrender-general-hint', 'data-kind': notice.kind, role: notice.kind === 'error' ? 'alert' : 'status' }, notice.text)),
+        h('div', { className: 'dshrender-general-control' },
+          h('input', {
+            className: 'dshrender-color',
+            type: 'color',
+            value: pickerValue,
+            'aria-label': translate('lightBackground'),
+            onChange: event => { scheduleCommit(event.target.value) },
+          }),
+          h('input', {
+            className: 'dshrender-input dshrender-color-text',
+            type: 'text',
+            spellCheck: false,
+            value: draft,
+            'aria-label': translate('lightBackground'),
+            placeholder: LIGHT_BACKGROUND_DEFAULT,
+            onChange: event => { setDraft(event.target.value) },
+            onBlur: commitDraft,
+            onKeyDown: event => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitDraft()
+              }
+            },
+          }),
+          h('button', {
+            type: 'button',
+            className: 'dshrender-secondary',
+            disabled: busy,
+            onClick: () => { void commit(LIGHT_BACKGROUND_DEFAULT) },
+          }, translate('lightBackgroundDefault')),
+          h('button', {
+            type: 'button',
+            className: 'dshrender-secondary',
+            disabled: busy,
+            onClick: () => { void commit('') },
+          }, translate('lightBackgroundNative'))))
     }
 
     /* ------------------------------ settings page ------------------------------ */
@@ -2711,7 +3122,7 @@ window.__ModuleLoader__.load({
           const payload = await response.json()
           if (payload?.ok !== true || !isRecord(payload.value)) throw new Error('malformed state payload')
           if (seq !== seqRef.current) return
-          const settings = mergeSettings(payload.value.settings, defaultSettings())
+          const settings = mergeSettings(payload.value.settings, runtime.settings)
           runtime.settings = settings
           writeCachedSettings(settings)
           setState({ settings, vendor: payload.value.vendor ?? {} })
@@ -2751,7 +3162,7 @@ window.__ModuleLoader__.load({
           if (!response.ok) throw new Error('HTTP ' + response.status)
           const payload = await response.json()
           if (payload?.ok !== true || !isRecord(payload.value)) throw new Error('malformed action response')
-          const settings = mergeSettings(payload.value.settings, defaultSettings())
+          const settings = mergeSettings(payload.value.settings, runtime.settings)
           setState(current => current === null ? { settings, vendor: {} } : { ...current, settings })
           if (editSeqRef.current === editSeq) {
             setDraft(settings)
@@ -3016,6 +3427,10 @@ window.__ModuleLoader__.load({
       runtime.disposed = false
       runtime.settingsReady = false
       activeRenders = 0
+      // A fresh apply owns the theme bridge; the previous fiber's teardown has
+      // already dropped its override layer.
+      themeScoped = null
+      themeOverrideDispose = null
       try {
         if (ctx.locale === undefined || ctx.locale === null || typeof ctx.locale.bind !== 'function') {
           throw new Error('locale service is unavailable')
@@ -3031,6 +3446,11 @@ window.__ModuleLoader__.load({
         }
       }
 
+      // The optional theme service stacks the warm light palette over the
+      // stock one. It may resolve after this call, in which case the bridge
+      // applies the current settings itself.
+      installThemeBridge(ctx)
+
       // Prefer the last known settings so the first paint already uses the
       // user's appearance. Without a cache, defer every enhancement and style
       // until `/state` answers: applying defaults first and the real settings a
@@ -3040,6 +3460,7 @@ window.__ModuleLoader__.load({
         runtime.settings = cached
         runtime.settingsReady = true
         applyStyles(cached)
+        syncThemeOverrides()
         if (document.body !== null) {
           scanBlocks(document)
           scanUserMessages(document)
@@ -3055,6 +3476,7 @@ window.__ModuleLoader__.load({
           if (runtime.settingsReady !== true) {
             runtime.settingsReady = true
             applyStyles(runtime.settings)
+            syncThemeOverrides()
             if (document.body !== null) {
               scanBlocks(document)
               scanUserMessages(document)
@@ -3069,6 +3491,7 @@ window.__ModuleLoader__.load({
         runtime.settingsReady = true
         if (firstReady || changed) {
           applyStyles(settings)
+          syncThemeOverrides()
           resetUserMessages()
           if (document.body !== null) {
             scanBlocks(document)
@@ -3107,9 +3530,23 @@ window.__ModuleLoader__.load({
         locale: NS,
       }, RenderSettingsSection))
 
+      // The light-theme color belongs next to Appearance and font size in the
+      // General section, not on the Render page: it is a whole-interface look,
+      // not a diagram setting.
+      ctx.slots?.inject?.('settings.general.item', () => ctx.slots.register({
+        name: 'settings.general.item',
+        id: 'dsh-render-light-background',
+        order: 12,
+        locale: NS,
+      }, LightBackgroundRow))
+
 
       ctx.effect(() => () => {
         runtime.disposed = true
+        // Drop the stacked light-palette layer so a disabled plugin leaves the
+        // stock theme behind.
+        disposeThemeOverride()
+        themeScoped = null
         // Close a fullscreen viewer opened by the plugin: it owns body scroll
         // and document key handlers, so leaving it behind would trap the page.
         try {
@@ -3164,7 +3601,8 @@ window.__ModuleLoader__.load({
         mergeSettings, defaultSettings, detectFenceKind, looksLikeCsv, parseCsv,
         parseEchartsOption, splitCsvLine, hashString, firstMeaningfulLine, renderCsvTable,
         clampZoom, appearanceCss, cleanCustomFont, clampUserMessageMaxHeight, shouldCollapseUserMessage,
-        clampUiScale, parseKeywordLines,
+        clampUiScale, parseKeywordLines, normalizeLightBackground, buildLightThemeOverrides,
+        shadeLightColor, LIGHT_THEME_TOKENS, LIGHT_BACKGROUND_DEFAULT,
       }
     }
 

@@ -10,8 +10,9 @@
 | Host 入口 | `index.js`（`export const name = 'dsh-render'`、`export function apply(ctx)`） |
 | Web 入口 | `client.js`（`window.__ModuleLoader__.load({ id: '@local/dsh-render', factory(require) })`） |
 | 插件行 id | `dsh-render`（`cordis.patch.yml` 的 `- insert: - id: dsh-render`） |
-| Client 注入服务 | `slots`、`locale` |
+| Client 注入服务 | 静态：`slots`、`locale`；动态可选：`theme`（`ctx.inject(['theme'])`，缺失时降级） |
 | 设置页 slot | `settings.section`，`id: 'render'`，`order: 31` |
+| 通用页外观行 slot | `settings.general.item`，`id: 'dsh-render-light-background'`，`order: 12`（宿主 Appearance=10、FontSize=11） |
 | DSH 兼容范围 | `engines.dsh: >=0.2.1-rc.2 <0.3.0`（0.2.1-rc.2 / rc.3 实测） |
 
 ## 2. 设置文档
@@ -44,7 +45,8 @@
     "codeLineHeight": 0,
     "codeLigatures": false,
     "collapseUserMessages": true,
-    "userMessageMaxHeight": 360
+    "userMessageMaxHeight": 360,
+    "lightBackground": "#FCFCFB"
   },
   "typography": {
     "textFontFamily": "",
@@ -71,6 +73,7 @@
 - `appearance.codeLineHeight`：`0`（跟随 DSH 外观）或 `[1.4, 1.9]`；
 - `appearance.collapseUserMessages`：boolean，默认 `true`（长用户消息默认折叠）；
 - `appearance.userMessageMaxHeight`：`[160, 800]`，默认 `360`；
+- `appearance.lightBackground`：`''` 或 `#RGB` / `#RRGGBB`（大小写归一为 `#RRGGBB`，可省略 `#`），默认 `#FCFCFB`；空串表示关闭覆盖、回到 DSH 原生浅色调色板；非法值归一为 `''`（关闭覆盖）；非字符串值保留原值；
 - `typography.textFontFamily`：字体栈字符串，去控制字符与 `; { } < > \\` 后 ≤200 字符，空串跟随原生；
 - `typography.textFontSize`：`0`（跟随原生）或 `[10, 22]`；
 - `typography.codeFontSize`：`0` 或 `[10, 16]`；
@@ -252,7 +255,33 @@
 - 表格：`table=claude` 时给 `[data-chat-flow] table` / `[data-document-markdown] table` 应用 **Claude 风格**：1px 外框（`--dsw-alias-border-l2`，比 `l1` 稍深）、10px 圆角、表头半透明灰底（亮 `rgba(0,0,0,.05)` / 暗 `rgba(255,255,255,.07)`，另以 `color-mix(label-primary 6%)` 兜底）、表头 `label-primary` + 600 字重（避免次级文字色在浅灰底上显得发虚）、表头底部 1px `--dsw-alias-border-l2`、行间 1px `--dsw-alias-border-l2`、`8px 12px` 内边距、顶部对齐、行高 1.5、无竖线、**无行悬停**；**字号使用 `var(--dsh-content-font-size, 14px)`，随设置 → 外观的通用字号变化**（表格内 code 为 `0.9em` 随表格缩放）；**所有表格强制适应会话列宽**：直接包含表格的外层 `div:has(> table)` 先强制 `width:100%`（否则它作为 flex item 会收缩到内容宽，令表格的 100% 失去参照），表格再用 `width:100%` + `max-width:100%` + `table-layout:fixed` + `box-sizing:border-box`，列宽等分，单元格 `white-space:normal` + `overflow-wrap:anywhere` 允许严重换行，长 URL/行内 code 也可断行；宽表外层 `.md-table-wide` 用 `overflow-x:hidden`（覆盖宿主悬停时的 `overflow-x:scroll`），表格强制适应用会话宽度、不出现横向滚动；CSV 表格（`.dshrender-table`）落在同一作用域内，随之统一；
 - 所有样式均限定在 Markdown 区域，插件禁用时随 `dsh-render-appearance` 一起移除。
 
-### 4.5 长用户消息折叠
+### 4.5 浅色主题 token 覆盖层（护眼浅色）
+
+- 机制：`client.js` 在 `ctx.inject(['theme'])` 解析后调用 `ctx.theme.overrideTokens('dsh-render', overrides)`，叠加一层主题 token 覆盖。`overrides` 的每个 token 都是 `{ light, dark }` 成对值；主题服务的 presenter 把它们写成 `<body>` 上的内联 CSS 变量，因此无需注入样式表、无需与宿主选择器抢优先级，也不产生每帧计算。
+- 覆盖的浅色表面（`light` 值由 `appearance.lightBackground` 派生，见下）：
+
+  | token | 相对基色差 | 用途 |
+  |---|---|---|
+  | `--dsw-alias-bg-base` | 0 | 页面/会话/代码块 banner 底色 |
+  | `--dsw-alias-bg-layer-1/2/3` | 0 | 主面层/嵌套面层/浮层面层 |
+  | `--dsw-specific-input-major` | 0 | 输入框卡片 |
+  | `--dsw-alias-markdown-code-segment-selected` | 0 | 代码块分段选中态 |
+  | `--dsw-alias-button-elevated-fill` / `--dsw-alias-button-floating-fill` | 0 | 抬升/浮动按钮 |
+  | `--dsw-specific-sidebar-fill` / `--dsw-alias-markdown-code-block` / `--dsw-alias-markdown-code-block-banner` / `--dsw-specific-login-input` | 6 | 侧栏、代码块、banner、登录输入 |
+  | `--dsw-alias-markdown-inline-code` | 5 | 行内 code（DSH 原生风格时） |
+  | `--dsw-specific-selector` / `--dsw-specific-tip` / `--dsw-alias-bg-module-platform` / `--dsw-alias-bg-multi-select` / `--dsw-alias-markdown-placeholder` | 10 | 选择器、提示、模块底、多选、占位底 |
+  | `--dsw-alias-markdown-code-segment-unselected` / `--dsw-alias-markdown-tag` / `--dsw-alias-button-floating-hover` | 14 | 分段未选、标签、浮动按钮悬停 |
+  | `--dsw-alias-markdown-citation` / `--dsw-alias-bg-document-preview` / `--dsw-specific-sidebar-nav-item-active` / `--dsw-alias-button-primary-dimmed` / `--dsw-alias-button-ghost-active-fill` | 20 | 引用、文档预览、侧栏选中、主按钮淡底、幽灵按钮选中 |
+  | `--dsw-alias-bg-overlay` / `--dsw-alias-button-ghost-active-hover` | 22 | 浮层底、幽灵按钮悬停 |
+
+- 派生规则：浅色值 = `shade(base, delta)`，逐通道减 `delta`，并把每通道下限钳在 `200`（`#C8C8C8`）；因此用户选极暗的颜色只会得到深灰浅色面，不会破坏标签对比度。`base` 本身也先过该下限。
+- `dark` 值：一律写成 `var(--dsw-static-*, <rc.3 实值>)`，即宿主深色调色板的原值（外带 rc.3 硬编码回退）。深色模式下渲染结果与原生完全一致；宿主升级改色时仍跟随 static 调色板。
+- 更新时机：设置变化时以相同 source 重新注册（服务语义是“同 source 整体替换”，只发一次 `theme/change`）；`''` 表示关闭覆盖，直接 dispose 该层。插件 teardown 时 dispose，页面恢复原生浅色。
+- 预览与提交：通用页外观行的取色器拖动时只 restack 覆盖层（不重扫会话、不重渲染图表）；停手 500ms 或失焦/回车后 `POST /action` 持久化，并在成功后 `applySettings` 重渲染图表（Mermaid/ECharts 的主题变量会读取新 token）。
+- 降级：宿主没有 `theme` 服务（0.2.1-rc.2 及更早）时不注册该层，界面保持 DSH 原生浅色，其余功能不受影响；`overrideTokens` 抛错也只降级、不使插件失败。
+- 旧 Host 向前兼容：`GET /state` 返回的文档可能缺少 `lightBackground`（旧 Host 的归一化会丢弃未知字段）。客户端合并时以当前内存值为基座（`mergeSettings(hostDoc, runtime.settings)`），因此缺字段不会把颜色打回默认；`POST /action` 后若响应文档同样缺该字段，行内保留本地颜色并提示重启 dsh web，而不是回填默认值。
+
+### 4.6 长用户消息折叠
 
 - 锚点：聊天流中的 `[data-chat-flow-kind="user"]` 节点，折叠对象为其内部的 `[data-message-bubble]`；
 - 当 `bubble.scrollHeight > 阈值 + 24` 时，给气泡加 `.dshrender-user-collapsed`（`max-height: var(--dshrender-user-max-height)` + `overflow:hidden` + 底部 56px 渐变遮罩），并在气泡后插入 `.dshrender-user-toggle` 按钮；
@@ -261,12 +290,12 @@
 - 默认折叠（`collapseUserMessages: true`）；关闭设置或插件 teardown 时移除按钮与折叠 class；
 - 重渲染/切换会话后气泡为新节点，重新按默认折叠；折叠只作用于文本气泡，附件与图片留在气泡外。
 
-### 4.6 生命周期
+### 4.7 生命周期
 
 - 启动：`apply(ctx)` 注册 locale；优先读取 localStorage 缓存 `dsh-render:settings-v1`，命中则先应用样式并扫描页面；无缓存时不应用外观、不增强任何区块，等 `GET /state` 返回后一次性应用并全量扫描（避免先用默认设置渲染、再被用户设置重排的二次抖动）；随后启动 `MutationObserver`（`document.body`，`childList/subtree/characterData/attributes[data-ds-dark-theme]`）与 4s 周期清扫；
 - 设置加载：`GET /state` 成功后更新内存设置并写缓存；与当前内存设置不同（或此前无缓存）时应用样式并重扫；
 - 设置保存：`POST /action` 成功后立即重扫并更新缓存；
-- 清理：`ctx.effect` 返回值断开 observer、关闭全屏查看器（恢复 body 滚动与焦点）、清空渲染队列与定时器、移除所有 surface、恢复源码显示、移除全部样式标签（`dsh-render-styles` 与 `dsh-render-appearance`）；插件禁用/页面刷新后页面恢复原生代码块，模块再次 apply 时复位 disposed 状态。
+- 清理：`ctx.effect` 返回值断开 observer、关闭全屏查看器（恢复 body 滚动与焦点）、清空渲染队列与定时器、移除所有 surface、恢复源码显示、移除全部样式标签（`dsh-render-styles` 与 `dsh-render-appearance`）、dispose 浅色主题覆盖层；插件禁用/页面刷新后页面恢复原生代码块与原生浅色调色板，模块再次 apply 时复位 disposed 状态。
 
 ## 5. 安全契约
 

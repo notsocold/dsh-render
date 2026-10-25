@@ -269,3 +269,219 @@ test('parseKeywordLines trims, dedupes, drops over-long lines, and caps the list
   const many = Array.from({ length: 60 }, (_, index) => 'k' + index).join('\n')
   assert.equal(helpers.parseKeywordLines(many).length, 50)
 })
+
+test('normalizeLightBackground canonicalizes hex colors', () => {
+  assert.equal(helpers.normalizeLightBackground('#f6f5f1'), '#F6F5F1')
+  assert.equal(helpers.normalizeLightBackground('FFF'), '#FFFFFF')
+  assert.equal(helpers.normalizeLightBackground(' #abc '), '#AABBCC')
+  assert.equal(helpers.normalizeLightBackground('#F6F5F1'), '#F6F5F1')
+  assert.equal(helpers.normalizeLightBackground('red'), '')
+  assert.equal(helpers.normalizeLightBackground('#GGGGGG'), '')
+  assert.equal(helpers.normalizeLightBackground(''), '')
+  assert.equal(helpers.normalizeLightBackground(42), '')
+  assert.equal(helpers.normalizeLightBackground(null), '')
+})
+
+test('mergeSettings normalizes the light-theme background color', () => {
+  assert.equal(helpers.defaultSettings().appearance.lightBackground, '#FCFCFB')
+  const merged = helpers.mergeSettings({ appearance: { lightBackground: '#efede6' } }, helpers.defaultSettings())
+  assert.equal(merged.appearance.lightBackground, '#EFEDE6')
+  const cleared = helpers.mergeSettings({ appearance: { lightBackground: '' } }, helpers.defaultSettings())
+  assert.equal(cleared.appearance.lightBackground, '', 'an empty value disables the override')
+  const invalid = helpers.mergeSettings({ appearance: { lightBackground: 'nope' } }, helpers.defaultSettings())
+  assert.equal(invalid.appearance.lightBackground, '')
+  const typed = helpers.mergeSettings({ appearance: { lightBackground: 42 } }, helpers.defaultSettings())
+  assert.equal(typed.appearance.lightBackground, '#FCFCFB', 'non-string keeps the base value')
+})
+
+test('buildLightThemeOverrides stacks warm light surfaces and stock dark values', () => {
+  const overrides = helpers.buildLightThemeOverrides('#FCFCFB')
+  assert.ok(overrides !== null)
+  assert.equal(overrides['--dsw-alias-bg-base'].light, '#FCFCFB')
+  assert.equal(overrides['--dsw-alias-bg-layer-1'].light, '#FCFCFB')
+  assert.equal(overrides['--dsw-specific-sidebar-fill'].light, '#F6F6F5', 'sidebar sits six channels below the base')
+  assert.equal(overrides['--dsw-alias-markdown-code-block'].light, '#F6F6F5')
+  assert.equal(overrides['--dsw-alias-markdown-inline-code'].light, '#F7F7F6', 'inline code sits five channels below')
+  assert.equal(overrides['--dsw-alias-bg-overlay'].light, '#E6E6E5', 'overlay sits twenty-two channels below')
+  assert.match(overrides['--dsw-alias-bg-base'].dark, /^var\(--dsw-static-neutral-bluish-950, rgb\(21, 21, 23\)\)$/)
+  assert.match(overrides['--dsw-alias-bg-layer-2'].dark, /^var\(--dsw-static-neutral-bluish-850, rgb\(44, 44, 46\)\)$/)
+
+  // Every alias token carries both palette modes; the light value is a
+  // readable shade (channel floor) so a user pick cannot kill label contrast.
+  for (const [token, value] of Object.entries(overrides)) {
+    assert.match(token, /^--dsw-(alias|specific)-/)
+    assert.match(value.light, /^#[0-9A-F]{6}$/)
+    assert.match(value.dark, /^var\(--dsw-static-/)
+    const channels = [0, 2, 4].map(index => Number.parseInt(value.light.slice(1 + index, 3 + index), 16))
+    for (const channel of channels) assert.ok(channel >= 200, token + ' stays readable: ' + value.light)
+  }
+
+  assert.equal(helpers.buildLightThemeOverrides(''), null, 'empty disables the layer')
+  assert.equal(helpers.buildLightThemeOverrides('red'), null)
+})
+
+test('buildLightThemeOverrides floors near-black picks to a readable surface', () => {
+  const overrides = helpers.buildLightThemeOverrides('#000000')
+  assert.equal(overrides['--dsw-alias-bg-base'].light, '#C8C8C8')
+  assert.equal(overrides['--dsw-alias-bg-overlay'].light, '#C8C8C8', 'derived shades never go below the floor')
+  const white = helpers.buildLightThemeOverrides('#FFFFFF')
+  assert.equal(white['--dsw-alias-bg-base'].light, '#FFFFFF')
+  assert.equal(white['--dsw-specific-sidebar-fill'].light, '#F9F9F9')
+})
+
+/**
+ * Load the browser bundle in a throwaway VM with a minimal browser/Сordis
+ * harness and run `apply(ctx)` once. The fake theme service records every
+ * override layer so tests can assert the wiring, not just the pure helpers.
+ * @param {Record<string, any>} hostSettings - settings the fake Host returns.
+ * @returns {{ overrides: object[], registered: string[] }}
+ */
+function runApply(hostSettings) {
+  const layers = []
+  const registered = []
+  const element = () => ({
+    id: '',
+    textContent: '',
+    className: '',
+    style: {},
+    setAttribute() {},
+    removeAttribute() {},
+    appendChild() {},
+    addEventListener() {},
+    removeEventListener() {},
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  })
+  const sandbox = {
+    window: {
+      __ModuleLoader__: { load(registration) { sandbox.__registration = registration } },
+      localStorage: { getItem: () => null, setItem: () => {} },
+      addEventListener() {},
+      removeEventListener() {},
+    },
+    document: {
+      body: {
+        ...element(),
+        hasAttribute: () => false,
+      },
+      documentElement: { hasAttribute: () => false },
+      head: { appendChild() {} },
+      createElement: () => element(),
+      getElementById: () => null,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      addEventListener() {},
+      removeEventListener() {},
+    },
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+    HTMLElement: class {},
+    Element: class {},
+    Node: class {},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval: () => 0,
+    clearInterval() {},
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ ok: true, value: { settings: hostSettings, vendor: {} } }),
+    }),
+    __DSH_RENDER_TEST__: true,
+  }
+  vm.createContext(sandbox)
+  vm.runInContext(source, sandbox)
+  const react = {
+    createElement: () => null,
+    useCallback: fn => fn,
+    useEffect: () => {},
+    useMemo: factory => factory(),
+    useRef: () => ({ current: null }),
+    useState: value => [value, () => {}],
+  }
+  const plugin = sandbox.__registration.factory(specifier => {
+    if (specifier === 'react') return react
+    throw new Error('unexpected module: ' + specifier)
+  })
+  const ctx = {
+    locale: { bind: () => key => key, register: () => () => {} },
+    effect(fn) {
+      fn()
+      return () => {}
+    },
+    slots: {
+      inject(name, callback) {
+        registered.push(name)
+        callback()
+      },
+      register() {
+        return () => {}
+      },
+    },
+    inject(dependencies, callback) {
+      if (!dependencies.includes('theme')) return
+      callback({
+        theme: {
+          overrideTokens(layerSource, tokens) {
+            const layer = { layerSource, tokens, disposed: false }
+            layers.push(layer)
+            return () => {
+              layer.disposed = true
+            }
+          },
+        },
+        effect(fn) {
+          fn()
+          return () => {}
+        },
+      })
+    },
+    logger: { warn() {} },
+  }
+  plugin.apply(ctx)
+  return { layers, registered }
+}
+
+test('apply stacks the light theme override through ctx.theme', async () => {
+  const { layers, registered } = runApply({
+    mermaid: { enabled: false },
+    appearance: { lightBackground: '#EFEDE6' },
+  })
+  // Let the fake /state response settle: the startup layer lands immediately,
+  // the accepted Host value restacks it right after.
+  await new Promise(resolve => setTimeout(resolve, 20))
+  assert.ok(layers.length >= 2, 'theme layer is stacked on startup and after /state')
+  const layer = layers.at(-1)
+  assert.equal(layer.layerSource, 'dsh-render')
+  assert.equal(layer.tokens['--dsw-alias-bg-base'].light, '#EFEDE6')
+  assert.equal(layer.tokens['--dsw-alias-bg-base'].dark, 'var(--dsw-static-neutral-bluish-950, rgb(21, 21, 23))')
+  assert.equal(Object.keys(layer.tokens).length, helpers.LIGHT_THEME_TOKENS.length)
+  // The row is contributed to the General section, the page to settings.
+  assert.ok(registered.includes('settings.general.item'))
+  assert.ok(registered.includes('settings.section'))
+})
+
+test('apply with an empty lightBackground keeps the stock palette', async () => {
+  const { layers } = runApply({
+    mermaid: { enabled: false },
+    appearance: { lightBackground: '' },
+  })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  // The startup default is stacked first; the empty Host value only disposes
+  // it (an empty value never stacks a layer), leaving the stock palette.
+  assert.equal(layers.length, 1)
+  assert.equal(layers[0].disposed, true)
+})
+
+test('apply keeps the local color when the running Host predates the setting', async () => {
+  // An older Host normalizer drops unknown fields, so its document carries no
+  // lightBackground key at all. The forward-compatible merge keeps the local
+  // value instead of snapping back to the recommended color.
+  const { layers } = runApply({ mermaid: { enabled: false } })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const last = layers.at(-1)
+  assert.equal(last.tokens['--dsw-alias-bg-base'].light, '#FCFCFB')
+  assert.equal(last.tokens['--dsw-specific-sidebar-fill'].light, '#F6F6F5')
+})
