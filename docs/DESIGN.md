@@ -56,7 +56,7 @@
         └── CSV: 本地解析
 ```
 
-不选 B（宿主补丁）：`ui-primitives` 是 web shell 的静态模块表依赖，改它需要重建 web 前端，且每次 DSH 升级都要重打补丁。
+不选 B（宿主补丁）：`ui-primitives` 是 web shell 的静态模块表依赖，改它需要重建 web 前端，且每次 DSH 升级都要重打补丁。设置导航图标是唯一可选的宿主补丁，缺失时只降级为通用齿轮，不影响渲染功能。
 不选 C（替换 assistant-step 节点）：需要复刻约 300 行宿主渲染逻辑（reasoning、图片、动作行、流式、mentions 等），且只覆盖聊天、不覆盖文档预览。
 
 ## 3. 架构
@@ -111,7 +111,9 @@ Web (client.js)
 | ECharts | 整段或 `{...}` 子串可解析为 JSON，且对象含 `series` 或 `xAxis`/`yAxis`/`dataset`/`geo`/`radar`/`polar`/`visualMap`/`dataZoom`/`timeline`/`calendar` |
 | CSV | 非空行 ≥2、列数一致（2–40 列）、首行不以 `[ { < #` 开头、前 6 行无代码特征（`=>`、`function`、`const`、标签等） |
 
-优先级：Mermaid → ECharts → CSV。检测失败/关闭时保持原生代码块。
+识别前置：优先读取代码卡片 banner 暴露的语言标签；命中常见编程/标记语言（python、js、ts、bash、html、css、sql、yaml、markdown、text 等）时保持原生代码块，`json`/`csv`/`echarts`/`mermaid` 除外。没有语言标签时，结构成立的 CSV 先于 Mermaid 首行关键字识别；Mermaid 关键字后紧跟 `=`/`,` 时不匹配。
+
+优先级：CSV（结构成立时）→ Mermaid → ECharts。检测失败/关闭时保持原生代码块。
 
 ## 6. 渲染与生命周期
 
@@ -119,8 +121,8 @@ Web (client.js)
 - surface 与 CodeBlock 同生命周期：React 卸载卡片时 surface 随之移除；插件禁用时统一清理。
 - React 流式更新只改 content 内的文本，不会动 surface 兄弟节点；文本变化通过 MutationObserver 感知。
 - 渲染令牌：每次内容/主题变化 token+1，过期异步结果丢弃。
-- 缓存：SVG 按 `hash(kind + theme + source)` 缓存（最多 60 条，LRU）。
-- 并发：最多 2 个图表渲染同时执行，避免阻塞主线程。
+- 缓存：SVG 按 `hash(kind + theme + maxTextSize + source)` 缓存（最多 60 条，LRU）。
+- 并发：最多 1 个图表渲染同时执行，避免阻塞主线程。
 - 超时：单次渲染 20s 超时，失败显示错误。
 - 主题切换：清空缓存、重新初始化 Mermaid、重渲染所有 surface。
 
@@ -163,7 +165,8 @@ Host 路由（全部 `ctx.connection.fetch.register`，认证同源）：
 
 ## 9. 测试与验收
 
-- Host：`node --test test/host.test.js`（设置归一化、vendor 路径安全、Content-Type、vendor 状态）。
+- Host：`node --test test/host.test.js`（设置归一化、vendor 路径安全、Content-Type、vendor 状态、路由与授权）。
+- Web：`node --test test/client.test.js`（设置归一化、识别/解析、外观 CSS、折叠阈值、缩放纯函数）。
 - 语法：`node --check index.js client.js lib/*.js`。
 - 页面验收（安装到 web profile 后）：
   1. 发一条 ` ```mermaid flowchart TD A-->B ` 消息 → 渲染成图，源码可切换；

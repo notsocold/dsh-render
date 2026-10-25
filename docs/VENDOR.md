@@ -24,7 +24,7 @@ Host 半通过只读路由 `/api/dsh-render/vendor/*` 提供入口与按需 chun
 - `vendor/mermaid/dist/mermaid.esm.min.mjs` 是唯一入口；
 - 入口通过 `./chunks/mermaid.esm.min/*.mjs` 相对路径导入各图类型；
 - chunk 之间同样使用相对导入，因此 **`dist/` 与 `chunks/` 的层级不能被展平或改名**；
-- 复制后对入口与 104 个 chunk 共 105 个模块做静态扫描，488 处相对 import 全部可解析，
+- 复制后对入口与 104 个 chunk 共 105 个模块做静态扫描，全部相对 import 均可解析，
   整棵模块树自包含。
 
 ### ECharts：UMD 单文件形态

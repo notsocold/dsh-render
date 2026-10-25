@@ -34,10 +34,14 @@ window.__ModuleLoader__.load({
     const CONTENT_SELECTOR = '[data-code-block-content]'
     const SURFACE_SELECTOR = '[data-dsh-render-surface]'
     const SKIP_SELECTOR = '[data-dsh-render-skip]'
+    const USER_MESSAGE_SELECTOR = '[data-chat-flow-kind="user"]'
     const STYLE_ID = 'dsh-render-styles'
     const SETTINGS_ORDER = 31
+    const SETTINGS_CACHE_KEY = 'dsh-render:settings-v1'
     const MAX_CONCURRENT = 1
     const RENDER_TIMEOUT_MS = 20000
+    const LOAD_TIMEOUT_MS = 15000
+    const ECHARTS_HEIGHT = 360
     const CACHE_LIMIT = 60
 
     /* ------------------------------ settings ------------------------------ */
@@ -186,9 +190,11 @@ window.__ModuleLoader__.load({
 
     const runtime = {
       settings: defaultSettings(),
-      settingsLoaded: false,
+      // False until the Host settings (or a cached copy) are available. No
+      // enhancement runs before that, so the page never renders once with
+      // default metrics and then reflows into the user's real appearance.
+      settingsReady: false,
       translate: key => key,
-      surfaces: new Set(),
       observers: [],
       disposed: false,
     }
@@ -202,7 +208,6 @@ window.__ModuleLoader__.load({
       sectionAppearance: 'Markdown 外观',
       appearanceHint: '这些样式只作用于聊天与文档预览中的 Markdown，不修改 DSH 源码。',
       sectionDiagrams: '图表',
-      sectionTables: '表格',
       sectionDetection: '识别',
       sectionPrompt: '模型提示',
       mermaidEnabled: '启用 Mermaid 渲染',
@@ -238,7 +243,6 @@ window.__ModuleLoader__.load({
       vendorLabel: '资源',
       mermaidVersion: 'Mermaid',
       echartsVersion: 'ECharts',
-      unsaved: '有未保存的更改',
       rendering: '渲染中…',
       renderFailed: '渲染失败',
       retry: '重试',
@@ -247,7 +251,6 @@ window.__ModuleLoader__.load({
       copy: '复制',
       copied: '已复制',
       downloadSvg: '下载 SVG',
-      downloadPng: '下载 PNG',
       fullscreen: '全屏',
       close: '关闭',
       zoomIn: '放大',
@@ -256,13 +259,10 @@ window.__ModuleLoader__.load({
       zoomFit: '适应屏幕',
       zoomHint: '滚轮缩放 · 拖拽平移 · 双击适应',
       sourceTooLarge: '源码过大，已保持代码块显示',
-      moduleLoading: '图表组件加载中…',
-      moduleFailed: '图表组件加载失败',
+      tableTruncated: '表格行数过多，仅显示前 2000 行',
       mermaidLabel: 'Mermaid',
       echartsLabel: 'ECharts',
       csvLabel: 'CSV',
-      chartHeight: '图表高度',
-      chartHeightHint: 'ECharts 容器的像素高度。',
       tableStyle: '表格风格',
       tableStyleClaude: 'Claude 风格',
       tableStyleDsh: 'DSH 原生',
@@ -297,24 +297,6 @@ window.__ModuleLoader__.load({
       userMessageMaxHeightHint: '160–800px，默认 360px。',
       expandMore: '展开更多',
       showLess: '收起',
-      typographyTitle: '字体与字号',
-      typographyHint: '覆盖界面字体与会话/代码/终端字号；留空或 0 表示跟随「通用 → 外观」。',
-      typographyFont: '界面字体',
-      typographyFontPlaceholder: '留空跟随原生，例如 "PingFang SC", sans-serif',
-      typographyTextSize: '会话字号（0 = 跟随）',
-      typographyCodeSize: '代码字号（0 = 跟随）',
-      typographyTerminalSize: '终端字号（0 = 跟随）',
-      typographySizeHint: '0 表示跟随原生外观设置',
-      typographyFollowNative: '跟随原生',
-      typographySave: '保存',
-      typographySaved: '已保存',
-      typographySaveFailed: '保存失败',
-      uiScaleTitle: '界面缩放',
-      uiScaleHint: '整体放大/缩小整个 Web 界面（字体与控件）。100% 为默认；实验性设置，可能影响滚动或弹层定位，出现异常请重置 100%。',
-      uiScaleSave: '应用',
-      uiScaleReset: '重置 100%',
-      uiScaleSaved: '已应用',
-      uiScaleSaveFailed: '应用失败',
     }
 
     const en = {
@@ -324,7 +306,6 @@ window.__ModuleLoader__.load({
       sectionAppearance: 'Markdown appearance',
       appearanceHint: 'These styles only affect Markdown in chat and document previews; DSH source stays untouched.',
       sectionDiagrams: 'Diagrams',
-      sectionTables: 'Tables',
       sectionDetection: 'Detection',
       sectionPrompt: 'Model hint',
       mermaidEnabled: 'Enable Mermaid rendering',
@@ -360,7 +341,6 @@ window.__ModuleLoader__.load({
       vendorLabel: 'Assets',
       mermaidVersion: 'Mermaid',
       echartsVersion: 'ECharts',
-      unsaved: 'Unsaved changes',
       rendering: 'Rendering…',
       renderFailed: 'Rendering failed',
       retry: 'Retry',
@@ -369,7 +349,6 @@ window.__ModuleLoader__.load({
       copy: 'Copy',
       copied: 'Copied',
       downloadSvg: 'Download SVG',
-      downloadPng: 'Download PNG',
       fullscreen: 'Fullscreen',
       close: 'Close',
       zoomIn: 'Zoom in',
@@ -378,13 +357,10 @@ window.__ModuleLoader__.load({
       zoomFit: 'Fit to screen',
       zoomHint: 'Scroll to zoom · Drag to pan · Double-click to fit',
       sourceTooLarge: 'Source is too large; the code block stays as-is',
-      moduleLoading: 'Loading diagram engine…',
-      moduleFailed: 'Diagram engine failed to load',
+      tableTruncated: 'Too many rows; showing the first 2000 rows only',
       mermaidLabel: 'Mermaid',
       echartsLabel: 'ECharts',
       csvLabel: 'CSV',
-      chartHeight: 'Chart height',
-      chartHeightHint: 'Pixel height of the ECharts container.',
       tableStyle: 'Table style',
       tableStyleClaude: 'Claude style',
       tableStyleDsh: 'DSH native',
@@ -419,24 +395,6 @@ window.__ModuleLoader__.load({
       userMessageMaxHeightHint: '160–800 px, default 360 px.',
       expandMore: 'Show more',
       showLess: 'Show less',
-      typographyTitle: 'Font and size',
-      typographyHint: 'Override the interface font and the conversation/code/terminal sizes; empty or 0 keeps Settings → General → Appearance.',
-      typographyFont: 'Interface font',
-      typographyFontPlaceholder: 'Empty follows native, e.g. "PingFang SC", sans-serif',
-      typographyTextSize: 'Conversation size (0 = native)',
-      typographyCodeSize: 'Code size (0 = native)',
-      typographyTerminalSize: 'Terminal size (0 = native)',
-      typographySizeHint: '0 follows the native Appearance setting',
-      typographyFollowNative: 'Follow native',
-      typographySave: 'Save',
-      typographySaved: 'Saved',
-      typographySaveFailed: 'Save failed',
-      uiScaleTitle: 'Interface scale',
-      uiScaleHint: 'Zooms the whole Web interface (font and controls). 100% is default; experimental — scrolling or popover placement may be affected, reset to 100% if anything looks off.',
-      uiScaleSave: 'Apply',
-      uiScaleReset: 'Reset 100%',
-      uiScaleSaved: 'Applied',
-      uiScaleSaveFailed: 'Apply failed',
     }
 
     let dictionaries = { zh, en }
@@ -490,11 +448,6 @@ window.__ModuleLoader__.load({
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;')
-    }
-
-    /** @param {number} ms - delay. @returns {Promise<void>} */
-    function sleep(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms))
     }
 
     /**
@@ -604,25 +557,74 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** @param {string} text - plain text. @returns {string} */
-    function textBlobUrl(text) {
-      return URL.createObjectURL(new Blob([text], { type: 'image/svg+xml;charset=utf-8' }))
-    }
-
     /** @param {unknown} value - thrown value. @returns {string} */
     function messageOf(value) {
       if (value instanceof Error) return value.message
       return String(value)
     }
 
-    /** @param {number} ms - timeout. @param {string} label - error label. @returns {Promise<never>} */
-    function timeoutReject(ms, label) {
-      return sleep(ms).then(() => {
-        throw new Error(label + ' timed out')
+    /**
+     * Race one loader against a real timer; the timer is cleared as soon as
+     * either side settles so a late success cannot keep a timer alive.
+     * @template T
+     * @param {Promise<T>} promise - loader.
+     * @param {number} ms - timeout.
+     * @param {string} label - error label.
+     * @returns {Promise<T>}
+     */
+    function withTimeout(promise, ms, label) {
+      let timer = 0
+      const timeout = new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(label + ' timed out')), ms)
       })
+      return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
     }
 
     /* ------------------------------ detection ------------------------------ */
+
+    /**
+     * Fence languages that must keep their native code block. When the host
+     * banner exposes one of these, a first line such as `graph = nx.Graph()`
+     * or `pie = 3.14` is ordinary source code, not a Mermaid diagram.
+     *
+     * `json`, `csv`, `echarts`, and `mermaid` are deliberately absent: those
+     * languages are exactly where the structural detectors must still work.
+     */
+    const KNOWN_CODE_LANGUAGES = new Set([
+      'python', 'python3', 'py', 'javascript', 'js', 'jsx', 'mjs', 'cjs', 'node',
+      'typescript', 'ts', 'tsx', 'bash', 'sh', 'shell', 'zsh', 'fish', 'powershell', 'ps1',
+      'html', 'htm', 'xml', 'css', 'scss', 'sass', 'less', 'stylus',
+      'sql', 'plsql', 'tsql', 'java', 'kotlin', 'kt', 'scala', 'groovy', 'gradle',
+      'go', 'golang', 'rust', 'rs', 'c', 'h', 'cpp', 'c++', 'cxx', 'hpp', 'cc',
+      'csharp', 'cs', 'fsharp', 'fs', 'ruby', 'rb', 'php', 'perl', 'pl', 'lua',
+      'r', 'julia', 'swift', 'objectivec', 'objc', 'dart', 'elixir', 'erlang',
+      'haskell', 'hs', 'clojure', 'clj', 'ocaml', 'ml', 'nim', 'zig', 'v',
+      'fortran', 'matlab', 'octave', 'asm', 'wasm', 'wat', 'vb', 'vbnet',
+      'dockerfile', 'makefile', 'cmake', 'nginx', 'hcl', 'terraform', 'tf', 'nix',
+      'proto', 'protobuf', 'graphql', 'gql', 'prisma', 'vue', 'svelte', 'astro',
+      'ini', 'toml', 'yaml', 'yml', 'diff', 'patch', 'log', 'logs',
+      'text', 'plaintext', 'markdown', 'md', 'mdx', 'latex', 'tex',
+      'sol', 'solidity', 'move', 'cue', 'dhall', 'json5', 'jsonc',
+    ])
+
+    /**
+     * The code-card banner's first cell usually holds the fence language (the
+     * host prints the raw info string for languages it highlights, and a
+     * localized "code" label otherwise). Return it only when it looks like a
+     * language id, so localized labels never affect detection.
+     * @param {HTMLElement} block - `.md-code-block` element.
+     * @returns {string} language id, or '' when unknown.
+     */
+    function bannerLanguage(block) {
+      try {
+        const banner = block.querySelector('[data-code-block-banner]')
+        const first = banner?.firstElementChild
+        const text = first?.textContent?.trim() ?? ''
+        return /^[A-Za-z0-9#+._-]{1,24}$/.test(text) ? text : ''
+      } catch {
+        return ''
+      }
+    }
 
     /** Mermaid diagram keywords accepted on the first meaningful line. */
     const MERMAID_KEYWORDS = [
@@ -642,7 +644,7 @@ window.__ModuleLoader__.load({
         .filter(keyword => typeof keyword === 'string' && keyword.trim() !== '')
         .map(keyword => keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
         .sort((left, right) => right.length - left.length)
-      return new RegExp('^(?:' + escaped.join('|') + ')\\b')
+      return new RegExp('^(?:' + escaped.join('|') + ')\\b(?!\\s*[=,])')
     }
 
     /**
@@ -678,6 +680,7 @@ window.__ModuleLoader__.load({
 
     /** @param {string} keyword - extra keyword. @returns {boolean} */
     function matchesExtraKeyword(source, keyword) {
+      if (typeof keyword !== 'string' || keyword === '') return false
       const head = firstMeaningfulLine(source)
       return head.startsWith(keyword) || head.toLowerCase().startsWith(keyword.toLowerCase())
     }
@@ -795,46 +798,76 @@ window.__ModuleLoader__.load({
       const header = splitCsvLine(lines[0])
       if (header === null) return null
       const rows = []
+      let truncated = false
       for (const line of lines.slice(1)) {
         const cells = splitCsvLine(line)
         if (cells === null) return null
         if (cells.length !== header.length) return null
         rows.push(cells)
-        if (rows.length >= 2000) break
+        if (rows.length >= 2000) {
+          truncated = true
+          break
+        }
       }
-      return { header, rows }
+      return { header, rows, ...(truncated ? { truncated: true } : {}) }
     }
 
     /**
      * Classify one fenced block.
      * @param {string} source - block text.
+     * @param {string} [language] - fence language exposed by the code-card banner.
      * @returns {'mermaid' | 'echarts' | 'csv' | null}
      */
-    function detectFenceKind(source) {
+    function detectFenceKind(source, language) {
       if (typeof source !== 'string' || source.trim() === '') return null
       const settings = runtime.settings
+      const languageId = typeof language === 'string' ? language.trim().toLowerCase() : ''
+      // A fence the host itself labels as a known programming/markup language is
+      // source the user wants to read: keep all three renderers out of it.
+      // `json`, `csv`, `echarts`, and `mermaid` are absent from the set, so
+      // those fences still reach the structural detectors below.
+      const codeLanguage = languageId !== '' && KNOWN_CODE_LANGUAGES.has(languageId)
+
+      if (codeLanguage) return null
+
+      // A structurally valid CSV wins before the first-line Mermaid heuristic:
+      // a header such as `graph,score` must render as a table, not a diagram.
+      if (settings.csv.enabled && looksLikeCsv(source)) return 'csv'
+
       if (settings.mermaid.enabled) {
         if (settings.detection.heuristic && isMermaidSource(source)) return 'mermaid'
-        if (!settings.detection.heuristic) {
-          for (const keyword of settings.detection.extraKeywords) {
-            if (matchesExtraKeyword(source, keyword)) return 'mermaid'
-          }
-        } else {
-          for (const keyword of settings.detection.extraKeywords) {
-            if (matchesExtraKeyword(source, keyword)) return 'mermaid'
-          }
+        for (const keyword of settings.detection.extraKeywords) {
+          if (matchesExtraKeyword(source, keyword)) return 'mermaid'
         }
       }
       if (settings.echarts.enabled && parseEchartsOption(source) !== null) return 'echarts'
-      if (settings.csv.enabled && looksLikeCsv(source)) return 'csv'
       return null
+    }
+
+    /**
+     * Parse the settings-page textarea into the bounded keyword list. Mirrors
+     * `lib/settings.js` so the saved document round-trips unchanged.
+     * @param {unknown} text - raw textarea value.
+     * @returns {string[]}
+     */
+    function parseKeywordLines(text) {
+      const seen = new Set()
+      const result = []
+      for (const line of String(text ?? '').split('\n')) {
+        const value = line.trim()
+        if (value === '' || value.length > 64 || seen.has(value)) continue
+        seen.add(value)
+        result.push(value)
+        if (result.length >= 50) break
+      }
+      return result
     }
 
     /* ------------------------------ vendor loading ------------------------------ */
 
     let mermaidModule = null
     let mermaidPromise = null
-    let mermaidThemeKey = ''
+    let mermaidConfigKey = ''
     let echartsModule = null
     let echartsPromise = null
     const echartsThemes = new Set()
@@ -846,7 +879,7 @@ window.__ModuleLoader__.load({
     function loadMermaid() {
       if (mermaidModule !== null) return Promise.resolve(mermaidModule)
       if (mermaidPromise === null) {
-        mermaidPromise = import(/* @vite-ignore */ MERMAID_ENTRY)
+        mermaidPromise = withTimeout(import(/* @vite-ignore */ MERMAID_ENTRY), LOAD_TIMEOUT_MS, 'mermaid module load')
           .then(module => {
             const api = module.default ?? module
             if (api === null || typeof api !== 'object' || typeof api.initialize !== 'function' || typeof api.render !== 'function') {
@@ -863,6 +896,22 @@ window.__ModuleLoader__.load({
       return mermaidPromise
     }
 
+    let mermaidWarmed = false
+
+    /**
+     * Warm the Mermaid ESM entry while the page is idle. The per-diagram
+     * chunks stay lazy; this only removes the entry-module latency from the
+     * first diagram the user opens.
+     */
+    function warmMermaid() {
+      if (mermaidWarmed || runtime.disposed) return
+      if (runtime.settings?.mermaid?.enabled !== true) return
+      mermaidWarmed = true
+      const kick = () => { void loadMermaid().catch(() => {}) }
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(kick, { timeout: 3000 })
+      else setTimeout(kick, 1200)
+    }
+
     /**
      * Load the vendored ECharts UMD bundle on first use.
      * @returns {Promise<Record<string, any>>}
@@ -870,14 +919,16 @@ window.__ModuleLoader__.load({
     function loadECharts() {
       if (echartsModule !== null) return Promise.resolve(echartsModule)
       if (echartsPromise === null) {
-        echartsPromise = new Promise((resolve, reject) => {
+        /** @type {HTMLScriptElement | null} */
+        let script = null
+        const load = new Promise((resolve, reject) => {
           const existing = globalThis.echarts
           if (existing !== undefined && existing !== null) {
             echartsModule = existing
             resolve(existing)
             return
           }
-          const script = document.createElement('script')
+          script = document.createElement('script')
           script.src = ECHARTS_ENTRY
           script.async = true
           script.dataset.dshRenderScript = 'echarts'
@@ -892,7 +943,11 @@ window.__ModuleLoader__.load({
           }
           script.onerror = () => reject(new Error('echarts script failed to load'))
           document.head.appendChild(script)
-        }).catch(cause => {
+        })
+        echartsPromise = withTimeout(load, LOAD_TIMEOUT_MS, 'echarts script load').catch(cause => {
+          // Drop a failed/timed-out tag so a retry starts clean instead of
+          // accumulating one script element per attempt.
+          try { script?.remove() } catch { /* best-effort */ }
           echartsPromise = null
           throw cause
         })
@@ -965,19 +1020,34 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Initialize Mermaid once per resolved theme.
+     * Effective Mermaid text limit: the saved setting, clamped to the schema
+     * bounds. Kept in sync with `enhanceBlock`'s source-length gate so a fence
+     * below that gate can never hit Mermaid's smaller internal default (50k)
+     * and render a "Maximum text size" placeholder as if it were a diagram.
+     * @returns {number}
+     */
+    function mermaidTextLimit() {
+      const value = Number(runtime.settings?.mermaid?.maxSourceChars)
+      return Number.isFinite(value) ? Math.max(2000, Math.min(2000000, Math.round(value))) : 200000
+    }
+
+    /**
+     * Initialize Mermaid once per resolved theme and text limit.
      * @param {'light' | 'dark'} theme - resolved theme.
      * @returns {Promise<Record<string, any>>}
      */
     async function configureMermaid(theme) {
       const api = await loadMermaid()
-      if (mermaidThemeKey === theme) return api
+      const maxTextSize = mermaidTextLimit()
+      const configKey = theme + ':' + maxTextSize
+      if (mermaidConfigKey === configKey) return api
       api.initialize({
         startOnLoad: false,
         securityLevel: 'strict',
         theme: theme === 'dark' ? 'dark' : 'default',
         htmlLabels: false,
         fontFamily: 'inherit',
+        maxTextSize,
         themeVariables: mermaidThemeVariables(theme),
         flowchart: { htmlLabels: false, useMaxWidth: true, curve: 'basis' },
         sequence: { useMaxWidth: true },
@@ -985,7 +1055,7 @@ window.__ModuleLoader__.load({
         journey: { useMaxWidth: true },
         timeline: { useMaxWidth: true },
       })
-      mermaidThemeKey = theme
+      mermaidConfigKey = configKey
       return api
     }
 
@@ -1002,6 +1072,26 @@ window.__ModuleLoader__.load({
         svgCache.set(key, value)
       }
       return value
+    }
+
+    /**
+     * Whether a synchronous cache hit exists for this block. Mirrors the keys
+     * used by `renderMermaidSvg` / `renderEchartsSvg`.
+     * @param {string} source - block source.
+     * @param {string} kind - fence kind.
+     * @param {'light' | 'dark'} theme - resolved theme.
+     * @returns {boolean}
+     */
+    function cachedRenderFor(source, kind, theme) {
+      if (kind === 'mermaid') {
+        return svgCache.has('m:' + hashString(theme + ':' + mermaidTextLimit() + '\n' + source))
+      }
+      if (kind === 'echarts') {
+        const option = parseEchartsOption(source)
+        if (option === null) return false
+        return svgCache.has('e:' + hashString(theme + ':' + ECHARTS_HEIGHT + '\n' + JSON.stringify(option)))
+      }
+      return false
     }
 
     /** @param {string} key - cache key. @param {string} value - SVG. */
@@ -1033,6 +1123,16 @@ window.__ModuleLoader__.load({
     }
 
     function pumpRenders() {
+      if (runtime.disposed) {
+        // Reject work queued before teardown instead of leaving promises
+        // pending forever; the render owners already treat rejection as an
+        // error and the disposed guard keeps them from touching the DOM.
+        while (pendingRenders.length > 0) {
+          const entry = pendingRenders.shift()
+          try { entry?.reject?.(new Error('dsh-render: plugin disposed')) } catch { /* already settled */ }
+        }
+        return
+      }
       while (activeRenders < MAX_CONCURRENT && pendingRenders.length > 0) {
         const entry = pendingRenders.shift()
         if (entry === undefined) break
@@ -1041,7 +1141,7 @@ window.__ModuleLoader__.load({
           .then(entry.task)
           .then(entry.resolve, entry.reject)
           .finally(() => {
-            activeRenders -= 1
+            if (activeRenders > 0) activeRenders -= 1
             pumpRenders()
           })
       }
@@ -1058,7 +1158,8 @@ window.__ModuleLoader__.load({
      * @returns {Promise<string>}
      */
     async function renderMermaidSvg(source, theme) {
-      const cacheKey = 'm:' + hashString(theme + '\n' + source)
+      const maxTextSize = mermaidTextLimit()
+      const cacheKey = 'm:' + hashString(theme + ':' + maxTextSize + '\n' + source)
       const cached = cacheGet(cacheKey)
       if (cached !== undefined) return cached
       return enqueueRender(async () => {
@@ -1066,23 +1167,29 @@ window.__ModuleLoader__.load({
         renderSequence += 1
         const id = 'dsh-render-mermaid-' + renderSequence
         let timer = 0
+        // A real timer handle: clear it as soon as the render settles so a
+        // slow-but-successful diagram cannot both succeed and time out.
+        const timeout = new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('mermaid render timed out')), RENDER_TIMEOUT_MS)
+        })
         try {
-          const result = await Promise.race([
-            api.render(id, source),
-            timeoutReject(RENDER_TIMEOUT_MS, 'mermaid render').finally(() => { clearTimeout(timer) }),
-          ])
+          const result = await Promise.race([api.render(id, source), timeout])
           const svg = result?.svg
           if (typeof svg !== 'string' || svg.trim() === '') throw new Error('mermaid returned no SVG')
           cacheSet(cacheKey, svg)
           return svg
         } finally {
+          clearTimeout(timer)
           try {
-            const leftover = document.getElementById(id)
-            if (leftover !== null) leftover.remove()
+            // Mermaid mounts its scratch element as `d${id}`; older builds used
+            // `id` directly. Remove both so a timed-out render leaves no DOM.
+            for (const leftoverId of [id, 'd' + id]) {
+              const leftover = document.getElementById(leftoverId)
+              if (leftover !== null) leftover.remove()
+            }
           } catch {
             // Cleanup is best-effort.
           }
-          clearTimeout(timer)
         }
       })
     }
@@ -1176,12 +1283,17 @@ window.__ModuleLoader__.load({
         surface.appendChild(bar)
         surface.appendChild(body)
         surface.addEventListener('click', onSurfaceClick)
+        // Keep the code block at its original height while the first render is
+        // in flight. Inserting a visible "rendering" surface below the source
+        // made the page grow and then shrink again when the diagram landed.
+        surface.style.display = 'none'
         block.appendChild(surface)
       }
       if (surface.getAttribute('data-dsh-render-surface') !== kind) {
         surface.setAttribute('data-dsh-render-surface', kind)
         const body = surface.querySelector('[data-dsh-render-body]')
         if (body !== null) body.textContent = ''
+        surface.style.display = 'none'
       }
       return surface
     }
@@ -1207,7 +1319,11 @@ window.__ModuleLoader__.load({
     /** @param {HTMLElement} surface - surface. @param {string} text - status copy. */
     function setStatus(surface, text) {
       const status = surface.querySelector('.dshrender-status')
-      if (status !== null) status.textContent = text
+      if (status !== null) {
+        status.textContent = text
+        // The bar ellipsizes long errors; keep the full text reachable.
+        status.title = text
+      }
     }
 
     /** @param {HTMLElement} surface - surface. @param {string} label - kind label. */
@@ -1359,45 +1475,6 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Fit content inside a viewport with a small margin, centered.
-     * @param {number} contentWidth - intrinsic content width.
-     * @param {number} contentHeight - intrinsic content height.
-     * @param {number} viewportWidth - available width.
-     * @param {number} viewportHeight - available height.
-     * @param {number} [margin] - fraction of the viewport used (default 0.94).
-     * @returns {{ scale: number, x: number, y: number }}
-     */
-    function fitTransform(contentWidth, contentHeight, viewportWidth, viewportHeight, margin = 0.94) {
-      if (!(contentWidth > 0) || !(contentHeight > 0) || !(viewportWidth > 0) || !(viewportHeight > 0)) {
-        return { scale: 1, x: 0, y: 0 }
-      }
-      const scale = clampZoom(Math.min((viewportWidth * margin) / contentWidth, (viewportHeight * margin) / contentHeight))
-      return {
-        scale,
-        x: (viewportWidth - contentWidth * scale) / 2,
-        y: (viewportHeight - contentHeight * scale) / 2,
-      }
-    }
-
-    /**
-     * Zoom around one viewport anchor so the content point under it stays put.
-     * @param {{ scale: number, x: number, y: number }} transform - current transform.
-     * @param {number} nextScale - requested scale.
-     * @param {number} pointerX - anchor X in viewport coordinates.
-     * @param {number} pointerY - anchor Y in viewport coordinates.
-     * @returns {{ scale: number, x: number, y: number }}
-     */
-    function zoomAt(transform, nextScale, pointerX, pointerY) {
-      const scale = clampZoom(nextScale)
-      const ratio = scale / transform.scale
-      return {
-        scale,
-        x: pointerX - (pointerX - transform.x) * ratio,
-        y: pointerY - (pointerY - transform.y) * ratio,
-      }
-    }
-
-    /**
      * Intrinsic size of a rendered SVG, preferring its viewBox so mermaid's
      * percentage width does not collapse the viewer.
      * @param {SVGElement} svg - rendered SVG element.
@@ -1472,6 +1549,9 @@ window.__ModuleLoader__.load({
       const overlay = document.createElement('div')
       overlay.className = 'dshrender-overlay'
       overlay.tabIndex = -1
+      overlay.setAttribute('role', 'dialog')
+      overlay.setAttribute('aria-modal', 'true')
+      const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
 
       const stage = document.createElement('div')
       stage.className = 'dshrender-overlay-stage'
@@ -1480,7 +1560,8 @@ window.__ModuleLoader__.load({
       bar.className = 'dshrender-overlay-bar'
       const title = document.createElement('span')
       title.className = 'dshrender-overlay-title'
-      title.textContent = translate(kind === 'mermaid' ? 'mermaidLabel' : kind === 'echarts' ? 'echartsLabel' : 'csvLabel') + ' · v9'
+      title.textContent = translate(kind === 'mermaid' ? 'mermaidLabel' : kind === 'echarts' ? 'echartsLabel' : 'csvLabel')
+      overlay.setAttribute('aria-label', title.textContent)
       const hint = document.createElement('span')
       hint.className = 'dshrender-overlay-hint'
       hint.textContent = translate('zoomHint')
@@ -1625,6 +1706,27 @@ window.__ModuleLoader__.load({
           dismiss()
           return
         }
+        // Leave browser/OS shortcuts alone (Ctrl/Cmd +/-/0 zoom the page).
+        if (event.ctrlKey || event.metaKey || event.altKey) return
+        if (event.key === 'Tab') {
+          const focusables = Array.from(overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+            .filter(element => element instanceof HTMLElement && !element.hidden && element.offsetParent !== null)
+          if (focusables.length === 0) {
+            event.preventDefault()
+            return
+          }
+          const first = focusables[0]
+          const last = focusables[focusables.length - 1]
+          const active = document.activeElement
+          if (event.shiftKey && (active === first || active === overlay)) {
+            event.preventDefault()
+            last.focus()
+          } else if (!event.shiftKey && active === last) {
+            event.preventDefault()
+            first.focus()
+          }
+          return
+        }
         if (svgIntrinsic === null) return
         if (event.key === '+' || event.key === '=') {
           event.preventDefault()
@@ -1649,6 +1751,8 @@ window.__ModuleLoader__.load({
         document.removeEventListener('keydown', onKey, true)
         window.removeEventListener('resize', onResize)
         if (fullscreenCleanup === dismiss) fullscreenCleanup = null
+        // Return keyboard focus to the control that opened the viewer.
+        try { previousFocus?.focus?.() } catch { /* element may be gone */ }
       }
 
       const resizeObserver = typeof ResizeObserver !== 'undefined'
@@ -1692,7 +1796,7 @@ window.__ModuleLoader__.load({
      * @param {HTMLElement} block - `.md-code-block` element.
      */
     function enhanceBlock(block) {
-      if (runtime.disposed) return
+      if (runtime.disposed || !runtime.settingsReady) return
       if (!(block instanceof HTMLElement) || !block.isConnected) return
       if (block.hasAttribute('data-dsh-render-skip')) return
       const content = block.querySelector(CONTENT_SELECTOR)
@@ -1703,12 +1807,18 @@ window.__ModuleLoader__.load({
       const sourceHash = hashString(source)
       if (previous !== undefined && previous.hash === sourceHash && existing !== null) {
         const themeNow = previous.kind === 'mermaid' || previous.kind === 'echarts' ? resolveTheme() : 'light'
-        if (existing.dataset.dshRenderState === 'ready' && previous.theme === themeNow) return
-        if (existing.dataset.dshRenderState === 'error' && previous.errorHash === sourceHash) return
+        const surfaceState = existing.dataset.dshRenderState
+        // A settled or in-flight surface with the same source hash and theme is
+        // already the desired result. In particular the 4s sweep must never
+        // restart an in-flight render, or a slow diagram can be invalidated
+        // forever and never settle.
+        if ((surfaceState === 'ready' || surfaceState === 'rendering') && previous.theme === themeNow) return
+        if (surfaceState === 'error' && previous.errorHash === sourceHash) return
       }
       if (previous !== undefined && previous.kind === 'none' && previous.hash === sourceHash) return
-      const kind = detectFenceKind(source)
+      const kind = detectFenceKind(source, bannerLanguage(block))
       if (kind === null) {
+        block.removeAttribute('data-dsh-render-enhanced')
         if (existing !== null) {
           existing.remove()
           setSourceHidden(block, false)
@@ -1720,13 +1830,17 @@ window.__ModuleLoader__.load({
         return
       }
       const surface = ensureSurface(block, kind)
+      block.setAttribute('data-dsh-render-enhanced', '')
       const state = previous ?? {
         timer: 0, token: 0, theme: '', hash: '', kind: '',
         errorHash: '', errorKind: '', errorTheme: '',
       }
       blockState.set(block, state)
       const theme = kind === 'mermaid' || kind === 'echarts' ? resolveTheme() : 'light'
-      if (state.hash === sourceHash && state.theme === theme && state.kind === kind && surface.dataset.dshRenderState === 'ready') {
+      if (
+        state.hash === sourceHash && state.theme === theme && state.kind === kind
+        && (surface.dataset.dshRenderState === 'ready' || surface.dataset.dshRenderState === 'rendering')
+      ) {
         return
       }
       state.hash = sourceHash
@@ -1741,15 +1855,27 @@ window.__ModuleLoader__.load({
       surface.dataset.dshRenderReady = 'false'
       const body = surface.querySelector('[data-dsh-render-body]')
       if (!(body instanceof HTMLElement)) return
-      if (typeof source.length === 'number' && kind === 'mermaid' && source.length > runtime.settings.mermaid.maxSourceChars) {
+      if (typeof source.length === 'number' && source.length > runtime.settings.mermaid.maxSourceChars) {
         setStatus(surface, translate('sourceTooLarge'))
         body.innerHTML = '<div class="dshrender-empty">' + escapeHtml(translate('sourceTooLarge')) + '</div>'
+        // Remember this exact source as a terminal error so the periodic sweep
+        // does not rewrite the same message every 4s.
+        surface.dataset.dshRenderState = 'error'
+        state.errorHash = sourceHash
+        state.errorKind = kind
+        state.errorTheme = theme
+        surface.style.display = ''
         setSourceHidden(block, false)
         return
       }
+      surface.dataset.dshRenderState = 'rendering'
+      const downloadButton = surface.querySelector('[data-act="download"]')
+      if (downloadButton instanceof HTMLElement) downloadButton.style.display = 'none'
       setStatus(surface, translate('rendering'))
       if (body.childElementCount === 0) body.innerHTML = '<div class="dshrender-empty">' + escapeHtml(translate('rendering')) + '</div>'
-      const delay = Math.max(200, Math.min(3000, runtime.settings.mermaid.debounceMs))
+      // A cached diagram needs no streaming-stability wait; rendering it now
+      // is what keeps reopening a session from flashing "rendering".
+      const delay = cachedRenderFor(source, kind, theme) ? 0 : Math.max(200, Math.min(3000, runtime.settings.mermaid.debounceMs))
       if (state.timer !== 0) clearTimeout(state.timer)
       state.timer = setTimeout(() => {
         state.timer = 0
@@ -1777,6 +1903,7 @@ window.__ModuleLoader__.load({
           if (state.token !== token || !block.isConnected) return
           body.innerHTML = svg
           setSourceHidden(block, true)
+          surface.style.display = ''
           body.style.display = ''
           markSurfaceReady(surface, state)
           setStatus(surface, '')
@@ -1784,11 +1911,12 @@ window.__ModuleLoader__.load({
         } else if (kind === 'echarts') {
           const option = parseEchartsOption(source)
           if (option === null) throw new Error('invalid ECharts option')
-          const height = runtime.settings.chartHeight ?? 360
+          const height = ECHARTS_HEIGHT
           const svg = await renderEchartsSvg(option, theme, height)
           if (state.token !== token || !block.isConnected) return
           body.innerHTML = svg
           setSourceHidden(block, true)
+          surface.style.display = ''
           body.style.display = ''
           markSurfaceReady(surface, state)
           setStatus(surface, '')
@@ -1799,16 +1927,18 @@ window.__ModuleLoader__.load({
           if (state.token !== token || !block.isConnected) return
           body.innerHTML = renderCsvTable(table)
           setSourceHidden(block, true)
+          surface.style.display = ''
           body.style.display = ''
           markSurfaceReady(surface, state)
-          setStatus(surface, '')
+          setStatus(surface, table.truncated === true ? translate('tableTruncated') : '')
           setSourceButton(surface, true)
         }
       } catch (cause) {
-        if (state.token !== token) return
+        if (state.token !== token || runtime.disposed) return
         setStatus(surface, translate('renderFailed') + ': ' + messageOf(cause).slice(0, 240))
         body.innerHTML = '<div class="dshrender-empty">' + escapeHtml(translate('renderFailed')) + '</div>'
         body.style.display = ''
+        surface.style.display = ''
         markSurfaceError(surface, state, sourceHash, kind, theme)
         setSourceButton(surface, true)
         // Keep the source visible on failure.
@@ -1844,7 +1974,7 @@ window.__ModuleLoader__.load({
      * @param {HTMLElement} node - `[data-chat-flow-kind="user"]` node.
      */
     function enhanceUserMessage(node) {
-      if (runtime.disposed) return
+      if (runtime.disposed || !runtime.settingsReady) return
       const bubble = node.querySelector('[data-message-bubble]')
       if (!(bubble instanceof HTMLElement)) return
       const appearance = runtime.settings.appearance ?? {}
@@ -1923,6 +2053,8 @@ window.__ModuleLoader__.load({
     let scanScheduled = false
     /** @type {Set<HTMLElement>} */
     const pendingBlocks = new Set()
+    /** @type {Set<HTMLElement>} */
+    const pendingUserNodes = new Set()
 
     /** @param {HTMLElement} block - code block to revisit. */
     function markBlock(block) {
@@ -1949,7 +2081,19 @@ window.__ModuleLoader__.load({
             }
           }
         }
-        scanUserMessages(document)
+        // Only newly mounted user messages are re-evaluated here; the full
+        // document scan stays on the initial pass, settings changes, and the
+        // 4s sweep. Streaming assistant text must not force a layout read of
+        // every user bubble on every mutation batch.
+        const userNodes = [...pendingUserNodes]
+        pendingUserNodes.clear()
+        for (const node of userNodes) {
+          try {
+            enhanceUserMessage(node)
+          } catch {
+            // Best-effort.
+          }
+        }
       }, 40)
     }
 
@@ -2004,6 +2148,13 @@ window.__ModuleLoader__.load({
                   if (block instanceof HTMLElement) markBlock(block)
                 }
               }
+              if (added.matches(USER_MESSAGE_SELECTOR)) pendingUserNodes.add(added)
+              const nestedUsers = added.querySelectorAll?.(USER_MESSAGE_SELECTOR)
+              if (nestedUsers !== undefined) {
+                for (const node of nestedUsers) {
+                  if (node instanceof HTMLElement) pendingUserNodes.add(node)
+                }
+              }
               const block = closestBlock(added)
               if (block !== null) markBlock(block)
             }
@@ -2030,7 +2181,7 @@ window.__ModuleLoader__.load({
     function handleThemeChange() {
       if (runtime.disposed) return
       svgCache.clear()
-      mermaidThemeKey = ''
+      mermaidConfigKey = ''
       for (const surface of document.querySelectorAll(SURFACE_SELECTOR)) {
         const block = surface.closest(BLOCK_SELECTOR)
         if (!(block instanceof HTMLElement)) continue
@@ -2053,6 +2204,11 @@ window.__ModuleLoader__.load({
      */
     function applySettings(next) {
       runtime.settings = next
+      runtime.settingsReady = true
+      // Theme- and text-limit-dependent SVG strings must not survive a settings
+      // change; both are part of the cache key, but stale entries only waste
+      // memory once the new values arrive.
+      svgCache.clear()
       for (const block of document.querySelectorAll(BLOCK_SELECTOR)) {
         if (!(block instanceof HTMLElement)) continue
         const state = blockState.get(block)
@@ -2070,25 +2226,61 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Read the last settings snapshot cached in the page. Used only to render
+     * the correct appearance/metrics before `/state` answers; the Host remains
+     * the source of truth and overwrites it immediately afterwards.
+     * @returns {Record<string, any> | null}
+     */
+    function readCachedSettings() {
+      try {
+        const raw = window.localStorage.getItem(SETTINGS_CACHE_KEY)
+        if (raw === null || raw === '') return null
+        const parsed = JSON.parse(raw)
+        if (!isRecord(parsed)) return null
+        return mergeSettings(parsed, defaultSettings())
+      } catch {
+        return null
+      }
+    }
+
+    /** @param {Record<string, any>} settings - settings snapshot to cache. */
+    function writeCachedSettings(settings) {
+      try {
+        window.localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(settings))
+      } catch {
+        // Private mode / quota: caching is an optimization, never a failure.
+      }
+    }
+
+    /**
      * Fetch settings from the Host half. Failure keeps the defaults so the page
      * still renders.
      * @returns {Promise<Record<string, any>>}
      */
     async function fetchSettings() {
+      // A hung Host would otherwise keep the plugin dormant forever; abort and
+      // let apply() fall back to the cache or the defaults.
+      const controller = typeof AbortController === 'function' ? new AbortController() : null
+      const timer = controller !== null ? setTimeout(() => controller.abort(), 5000) : 0
       try {
-        const response = await fetch(API_STATE, { credentials: 'same-origin', headers: { accept: 'application/json' } })
+        const response = await fetch(API_STATE, {
+          credentials: 'same-origin',
+          headers: { accept: 'application/json' },
+          ...(controller !== null ? { signal: controller.signal } : {}),
+        })
         if (!response.ok) throw new Error('state request failed: ' + response.status)
         const payload = await response.json()
         if (payload?.ok !== true || !isRecord(payload.value)) throw new Error('state payload is malformed')
-        runtime.settingsLoaded = true
         return mergeSettings(payload.value.settings, defaultSettings())
       } catch (cause) {
         try {
-          console.warn('dsh-render: settings unavailable, using defaults: ' + messageOf(cause))
+          console.warn('dsh-render: settings unavailable: ' + messageOf(cause))
         } catch {
           // Logging is best-effort.
         }
-        return defaultSettings()
+        return null
+      } finally {
+        if (timer !== 0) clearTimeout(timer)
       }
     }
 
@@ -2150,9 +2342,25 @@ window.__ModuleLoader__.load({
       }
       declarations.push('font-variant-ligatures:' + (appearance.codeLigatures === true ? 'normal' : 'none') + ';')
       const maxHeight = clampUserMessageMaxHeight(appearance.userMessageMaxHeight)
+      // Jump links and file references: the host only shows a dotted underline
+      // on hover/focus. Keep a dotted underline visible at rest, then make it
+      // heavier and fully colored on hover/focus. File references render as
+      // <button> elements whose CSS-module class contains fileMention/fileLink;
+      // match that stable substring because the hash itself is build-dependent.
+      const linkSelectors = [
+        'a[href]',
+        'a[class*="fileLink"]',
+        'button[class*="fileLink"]',
+        'a[class*="fileMention"]',
+        'button[class*="fileMention"]',
+      ].map(selector => scopes + ' ' + selector)
+      const linkResting = linkSelectors.join(', ')
+      const linkActive = linkSelectors.map(selector => selector + ':hover, ' + selector + ':focus-visible').join(', ')
       const rules = [
         ':root { --dshrender-user-max-height: ' + maxHeight + 'px; }',
         scopes + ' .md-code-block pre, ' + scopes + ' .md-code-block code, ' + scopes + ' :not(pre) > code { ' + declarations.join('') + ' }',
+        linkResting + ' { text-decoration-line: underline !important; text-decoration-style: dotted !important; text-decoration-thickness: 1.5px !important; text-underline-offset: 3px !important; text-decoration-color: color-mix(in srgb, var(--dsw-alias-link, #2f6fed) 76%, transparent) !important; }',
+        linkActive + ' { text-decoration-thickness: 2px !important; text-decoration-color: var(--dsw-alias-link, #2f6fed) !important; text-underline-offset: 4px !important; }',
       ]
       if (appearance.inlineCode === 'claude') {
         rules.push(
@@ -2163,11 +2371,11 @@ window.__ModuleLoader__.load({
       }
       if (appearance.codeBlock === 'claude' || appearance.codeBlock === 'minimal') {
         rules.push(
-          '.md-code-block { border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.4)); border-radius:10px; box-sizing:border-box; }',
-          '.md-code-block pre { border-bottom-left-radius:9px; border-bottom-right-radius:9px; }',
+          scopes + ' .md-code-block { border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.4)); border-radius:10px; box-sizing:border-box; }',
+          scopes + ' .md-code-block pre { border-bottom-left-radius:9px; border-bottom-right-radius:9px; }',
         )
         if (appearance.codeBlock === 'claude') {
-          rules.push('.md-code-block [data-code-block-banner] { border-bottom:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.4)); }')
+          rules.push(scopes + ' .md-code-block [data-code-block-banner] { border-bottom:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.4)); }')
         }
       }
       if (appearance.table === 'claude') {
@@ -2214,34 +2422,6 @@ window.__ModuleLoader__.load({
       style.textContent = appearanceCss(settings)
     }
 
-    /** @param {unknown} value - raw size. @param {number} min - minimum. @param {number} max - maximum. @returns {number} */
-    function clampTypographySize(value, min, max) {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return 0
-      const size = Math.round(value)
-      return size === 0 ? 0 : Math.min(max, Math.max(min, size))
-    }
-
-    /**
-     * General-page typography overrides. The variables are written on body with
-     * !important so they win over the native presenter's inline values; an empty
-     * string restores the native settings.
-     * @param {Record<string, any>} settings - normalized settings.
-     * @returns {string}
-     */
-    function typographyCss(settings) {
-      const typography = settings.typography ?? {}
-      const declarations = []
-      const font = cleanCustomFont(typography.textFontFamily)
-      if (font !== '') declarations.push('--dsh-font-family-text:' + font + ' !important;')
-      const textSize = clampTypographySize(typography.textFontSize, 10, 22)
-      if (textSize > 0) declarations.push('--dsh-content-font-size:' + textSize + 'px !important;')
-      const codeSize = clampTypographySize(typography.codeFontSize, 10, 16)
-      if (codeSize > 0) declarations.push('--dsh-code-font-size:' + codeSize + 'px !important;')
-      const terminalSize = clampTypographySize(typography.terminalFontSize, 10, 20)
-      if (terminalSize > 0) declarations.push('--dsh-terminal-font-size:' + terminalSize + 'px !important;')
-      return declarations.length === 0 ? '' : 'body { ' + declarations.join('') + ' }'
-    }
-
     /**
      * Whole-interface zoom bounds.
      * @param {unknown} value - raw scale.
@@ -2250,38 +2430,6 @@ window.__ModuleLoader__.load({
     function clampUiScale(value) {
       const scale = typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 100) / 100 : 1
       return Math.min(1.3, Math.max(0.8, scale))
-    }
-
-    /**
-     * Whole-interface zoom rule; 100% emits nothing so the native layout wins.
-     * @param {Record<string, any>} settings - normalized settings.
-     * @returns {string}
-     */
-    function zoomCss(settings) {
-      const scale = clampUiScale(settings.uiScale)
-      return scale === 1 ? '' : 'body { zoom: ' + scale + '; }'
-    }
-
-    /** @param {Record<string, any>} settings - normalized settings. */
-    function applyUiZoom(settings) {
-      let style = document.getElementById('dsh-render-zoom')
-      if (style === null) {
-        style = document.createElement('style')
-        style.id = 'dsh-render-zoom'
-        document.head.appendChild(style)
-      }
-      style.textContent = zoomCss(settings)
-    }
-
-    /** @param {Record<string, any>} settings - normalized settings. */
-    function applyUiTypography(settings) {
-      let style = document.getElementById('dsh-render-typography')
-      if (style === null) {
-        style = document.createElement('style')
-        style.id = 'dsh-render-typography'
-        document.head.appendChild(style)
-      }
-      style.textContent = typographyCss(settings)
     }
 
     /** @param {Record<string, any>} settings - settings snapshot. */
@@ -2342,7 +2490,7 @@ window.__ModuleLoader__.load({
         '.dshrender-row-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#888);}',
         '.dshrender-control{flex:none;display:flex;align-items:center;gap:8px;}',
         '.dshrender-input,.dshrender-select,.dshrender-textarea{box-sizing:border-box;border:0.5px solid var(--dsw-alias-border-l2,rgba(127,127,127,.4));border-radius:6px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);font:inherit;font-size:12px;padding:4px 8px;}',
-        '.dshrender-textarea{width:100%;min-height:72px;resize:vertical;font-family:var(--dsw-font-family-mono,monospace);}',
+        '.dshrender-textarea{width:100%;min-height:72px;resize:vertical;font-family:var(--ds-font-family-code, monospace);}',
         '.dshrender-actions-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}',
         '.dshrender-primary{border:0;border-radius:7px;padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;background:var(--dsw-alias-button-primary-fill,#2f6fed);color:var(--dsw-alias-label-primary-foreground,#fff);}',
         '.dshrender-primary:disabled{opacity:.5;cursor:default;}',
@@ -2351,171 +2499,15 @@ window.__ModuleLoader__.load({
         '.dshrender-note[data-kind="error"]{color:var(--dsw-alias-state-error-primary,#c0392b);}',
         '.dshrender-note[data-kind="success"]{color:var(--dsw-alias-state-success-primary,#2e7d32);}',
         '.dshrender-vendor{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-tertiary,#888);}',
-        '.dshrender-vendor code{font-family:var(--dsw-font-family-mono,monospace);}',
+        '.dshrender-vendor code{font-family:var(--ds-font-family-code, monospace);}',
         '.dshrender-checkbox{width:15px;height:15px;accent-color:var(--dsw-alias-brand-primary,#2f6fed);}',
         '.dshrender-user-collapsed{max-height:var(--dshrender-user-max-height,360px);overflow:hidden;-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 56px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 56px),transparent);}',
         '.dshrender-user-toggle{align-self:flex-end;display:inline-flex;align-items:center;margin:4px 0 0;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#555);font:inherit;font-size:12px;line-height:18px;padding:2px 8px;border-radius:var(--dsw-radius-xs,4px);cursor:pointer;}',
         '.dshrender-user-toggle:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,#111);}',
-        '.dshrender-general-typography{display:flex;flex-direction:column;gap:10px;padding:10px 0 14px;border-bottom:0.5px solid var(--dsw-alias-border-l1,rgba(127,127,127,.24));}',
-        '.dshrender-typography-head{display:flex;flex-direction:column;gap:2px;}',
-        '.dshrender-typography-grid{display:flex;flex-direction:column;gap:8px;}',
       ].join('\n')
     }
 
     /* ------------------------------ settings page ------------------------------ */
-
-    /**
-     * Persist one settings patch and apply it immediately.
-     * @param {Record<string, any>} patch - partial settings.
-     * @returns {Promise<Record<string, any>>} the normalized settings.
-     */
-    async function saveSettingsPatch(patch) {
-      const response = await fetch(API_ACTION, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ settings: patch }),
-      })
-      if (!response.ok) throw new Error('HTTP ' + response.status)
-      const payload = await response.json()
-      if (payload?.ok !== true || !isRecord(payload.value)) throw new Error('malformed action response')
-      const settings = mergeSettings(payload.value.settings, defaultSettings())
-      runtime.settings = settings
-      applyStyles(settings)
-      return settings
-    }
-
-    /**
-     * General settings page: interface font and the three font sizes. These
-     * write the same CSS variables the native Appearance rows own; an empty
-     * field or zero keeps the native value.
-     * @returns {import('react').ReactNode}
-     */
-    function TypographyGeneralRows() {
-      const [draft, setDraft] = useState(() => ({ ...runtime.settings.typography }))
-      const [busy, setBusy] = useState(false)
-      const [notice, setNotice] = useState('')
-      useEffect(() => {
-        let alive = true
-        void fetch(API_STATE, { credentials: 'same-origin', headers: { accept: 'application/json' } })
-          .then(response => response.json())
-          .then(payload => {
-            if (!alive || payload?.ok !== true || !isRecord(payload.value)) return
-            const merged = mergeSettings(payload.value.settings, defaultSettings())
-            runtime.settings = merged
-            setDraft({ ...merged.typography })
-          })
-          .catch(() => { /* keep the current draft */ })
-        return () => { alive = false }
-      }, [])
-      const patch = value => setDraft(current => ({ ...current, ...value }))
-      const save = async reset => {
-        setBusy(true)
-        setNotice('')
-        try {
-          const typography = reset
-            ? { textFontFamily: '', textFontSize: 0, codeFontSize: 0, terminalFontSize: 0 }
-            : draft
-          const settings = await saveSettingsPatch({ typography })
-          setDraft({ ...settings.typography })
-          setNotice(translate('typographySaved'))
-        } catch (cause) {
-          setNotice(translate('typographySaveFailed') + ': ' + messageOf(cause))
-        } finally {
-          setBusy(false)
-        }
-      }
-      return h('div', { className: 'dshrender-general-typography' },
-        h('div', { className: 'dshrender-typography-head' },
-          h('span', { className: 'dshrender-row-title' }, translate('typographyTitle')),
-          h('span', { className: 'dshrender-row-hint' }, translate('typographyHint'))),
-        h('div', { className: 'dshrender-typography-grid' },
-          settingRow(translate('typographyFont'), translate('typographyFontPlaceholder'),
-            h('input', {
-              className: 'dshrender-input', type: 'text', value: draft.textFontFamily,
-              onChange: event => { patch({ textFontFamily: event.target.value }) },
-            })),
-          settingRow(translate('typographyTextSize'), translate('typographySizeHint'),
-            h('input', {
-              className: 'dshrender-input', type: 'number', min: 0, max: 22, step: 1, value: draft.textFontSize,
-              onChange: event => { patch({ textFontSize: Number(event.target.value) || 0 }) },
-            })),
-          settingRow(translate('typographyCodeSize'), translate('typographySizeHint'),
-            h('input', {
-              className: 'dshrender-input', type: 'number', min: 0, max: 16, step: 1, value: draft.codeFontSize,
-              onChange: event => { patch({ codeFontSize: Number(event.target.value) || 0 }) },
-            })),
-          settingRow(translate('typographyTerminalSize'), translate('typographySizeHint'),
-            h('input', {
-              className: 'dshrender-input', type: 'number', min: 0, max: 20, step: 1, value: draft.terminalFontSize,
-              onChange: event => { patch({ terminalFontSize: Number(event.target.value) || 0 }) },
-            }))),
-        h('div', { className: 'dshrender-actions-row' },
-          h('button', {
-            type: 'button', className: 'dshrender-primary', disabled: busy,
-            onClick: () => { void save(false) },
-          }, busy ? translate('saving') : translate('typographySave')),
-          h('button', {
-            type: 'button', className: 'dshrender-secondary', disabled: busy,
-            onClick: () => { void save(true) },
-          }, translate('typographyFollowNative'))),
-        notice === '' ? null : h('p', { className: 'dshrender-note' }, notice))
-    }
-
-    /**
-     * General settings page: whole-interface zoom (font and controls).
-     * @returns {import('react').ReactNode}
-     */
-    function UiScaleRows() {
-      const [percent, setPercent] = useState(() => Math.round((runtime.settings.uiScale ?? 1) * 100))
-      const [busy, setBusy] = useState(false)
-      const [notice, setNotice] = useState('')
-      useEffect(() => {
-        let alive = true
-        void fetch(API_STATE, { credentials: 'same-origin', headers: { accept: 'application/json' } })
-          .then(response => response.json())
-          .then(payload => {
-            if (!alive || payload?.ok !== true || !isRecord(payload.value)) return
-            const merged = mergeSettings(payload.value.settings, defaultSettings())
-            runtime.settings = merged
-            setPercent(Math.round((merged.uiScale ?? 1) * 100))
-          })
-          .catch(() => { /* keep the current value */ })
-        return () => { alive = false }
-      }, [])
-      const save = async value => {
-        setBusy(true)
-        setNotice('')
-        try {
-          const settings = await saveSettingsPatch({ uiScale: value / 100 })
-          setPercent(Math.round((settings.uiScale ?? 1) * 100))
-          setNotice(translate('uiScaleSaved'))
-        } catch (cause) {
-          setNotice(translate('uiScaleSaveFailed') + ': ' + messageOf(cause))
-        } finally {
-          setBusy(false)
-        }
-      }
-      return h('div', { className: 'dshrender-general-typography' },
-        h('div', { className: 'dshrender-typography-head' },
-          h('span', { className: 'dshrender-row-title' }, translate('uiScaleTitle')),
-          h('span', { className: 'dshrender-row-hint' }, translate('uiScaleHint'))),
-        h('div', { className: 'dshrender-actions-row' },
-          h('input', {
-            className: 'dshrender-input', type: 'number', min: 80, max: 130, step: 5, value: percent,
-            onChange: event => { setPercent(Number(event.target.value) || 100) },
-          }),
-          h('span', { className: 'dshrender-row-hint' }, '%'),
-          h('button', {
-            type: 'button', className: 'dshrender-primary', disabled: busy,
-            onClick: () => { void save(percent) },
-          }, busy ? translate('saving') : translate('uiScaleSave')),
-          h('button', {
-            type: 'button', className: 'dshrender-secondary', disabled: busy,
-            onClick: () => { void save(100) },
-          }, translate('uiScaleReset'))),
-        notice === '' ? null : h('p', { className: 'dshrender-note' }, notice))
-    }
 
     /**
      * Settings → Rendering page.
@@ -2526,14 +2518,22 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState(null)
       const [phase, setPhase] = useState('loading')
       const [draft, setDraft] = useState(null)
+      // The keyword textarea keeps its raw text while the user types. Parsing
+      // on every keystroke would delete the empty line an Enter just created,
+      // making it impossible to enter a second keyword by keyboard.
+      const [keywordDraft, setKeywordDraft] = useState('')
       const [notice, setNotice] = useState(null)
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState('')
       const seqRef = useRef(0)
+      // Bumped on every local edit so a slow save response cannot overwrite
+      // text the user typed while the request was in flight.
+      const editSeqRef = useRef(0)
 
       const load = useCallback(async () => {
         const seq = ++seqRef.current
         setPhase('loading')
+        setBusy(true)
         setError('')
         try {
           const response = await fetch(API_STATE, { credentials: 'same-origin', headers: { accept: 'application/json' } })
@@ -2543,13 +2543,17 @@ window.__ModuleLoader__.load({
           if (seq !== seqRef.current) return
           const settings = mergeSettings(payload.value.settings, defaultSettings())
           runtime.settings = settings
+          writeCachedSettings(settings)
           setState({ settings, vendor: payload.value.vendor ?? {} })
           setDraft(settings)
+          setKeywordDraft(settings.detection.extraKeywords.join('\n'))
           setPhase('ready')
         } catch (cause) {
           if (seq !== seqRef.current) return
           setPhase('error')
           setError(messageOf(cause))
+        } finally {
+          if (seq === seqRef.current) setBusy(false)
         }
       }, [])
 
@@ -2558,10 +2562,16 @@ window.__ModuleLoader__.load({
       }, [load])
 
       const save = useCallback(async (reset) => {
+        const editSeq = editSeqRef.current
         setBusy(true)
         setNotice(null)
         try {
-          const body = reset ? { action: 'reset' } : { settings: draft }
+          const body = reset ? { action: 'reset' } : {
+            settings: {
+              ...draft,
+              detection: { ...draft.detection, extraKeywords: parseKeywordLines(keywordDraft) },
+            },
+          }
           const response = await fetch(API_ACTION, {
             method: 'POST',
             credentials: 'same-origin',
@@ -2573,34 +2583,48 @@ window.__ModuleLoader__.load({
           if (payload?.ok !== true || !isRecord(payload.value)) throw new Error('malformed action response')
           const settings = mergeSettings(payload.value.settings, defaultSettings())
           setState(current => current === null ? { settings, vendor: {} } : { ...current, settings })
-          setDraft(settings)
+          if (editSeqRef.current === editSeq) {
+            setDraft(settings)
+            setKeywordDraft(settings.detection.extraKeywords.join('\n'))
+          }
           runtime.settings = settings
           applySettings(settings)
+          writeCachedSettings(settings)
           setNotice({ kind: 'success', text: translate('saved') })
         } catch (cause) {
           setNotice({ kind: 'error', text: translate('saveFailed') + ': ' + messageOf(cause) })
         } finally {
           setBusy(false)
         }
-      }, [draft])
+      }, [draft, keywordDraft])
 
       const patch = useCallback((section, value) => {
+        editSeqRef.current += 1
+        setNotice(null)
         setDraft(current => current === null ? current : mergeSettings({ [section]: value }, current))
       }, [])
 
       const setMermaid = useCallback((value) => {
+        editSeqRef.current += 1
+        setNotice(null)
         setDraft(current => current === null ? current : { ...current, mermaid: { ...current.mermaid, ...value } })
       }, [])
 
       const setDetection = useCallback((value) => {
+        editSeqRef.current += 1
+        setNotice(null)
         setDraft(current => current === null ? current : { ...current, detection: { ...current.detection, ...value } })
       }, [])
 
       const setPrompt = useCallback((value) => {
+        editSeqRef.current += 1
+        setNotice(null)
         setDraft(current => current === null ? current : { ...current, prompt: { ...current.prompt, ...value } })
       }, [])
 
       const setAppearance = useCallback((value) => {
+        editSeqRef.current += 1
+        setNotice(null)
         setDraft(current => current === null ? current : { ...current, appearance: { ...current.appearance, ...value } })
       }, [])
 
@@ -2618,7 +2642,7 @@ window.__ModuleLoader__.load({
       }
       const settings = draft ?? state?.settings ?? defaultSettings()
       const vendor = state?.vendor ?? {}
-      return h('div', { className: 'dshrender-settings' },
+      return h('div', { className: 'dshrender-settings', 'aria-busy': busy ? 'true' : undefined },
         h('h2', null, translate('title')),
         h('p', null, translate('intro')),
         h('div', { className: 'dshrender-vendor' },
@@ -2745,12 +2769,15 @@ window.__ModuleLoader__.load({
               onChange: event => { setDetection({ heuristic: event.target.checked }) },
             })),
           h('div', { className: 'dshrender-row-copy' },
-            h('span', { className: 'dshrender-row-title' }, translate('extraKeywords')),
-            h('span', { className: 'dshrender-row-hint' }, translate('extraKeywordsHint'))),
+            h('span', { className: 'dshrender-row-title', id: 'dshrender-extra-keywords-label' }, translate('extraKeywords')),
+            h('span', { className: 'dshrender-row-hint', id: 'dshrender-extra-keywords-hint' }, translate('extraKeywordsHint'))),
           h('textarea', {
             className: 'dshrender-textarea',
-            value: settings.detection.extraKeywords.join('\n'),
-            onChange: event => { setDetection({ extraKeywords: event.target.value.split('\n').map(line => line.trim()).filter(line => line !== '') }) },
+            'aria-labelledby': 'dshrender-extra-keywords-label',
+            'aria-describedby': 'dshrender-extra-keywords-hint',
+            value: keywordDraft,
+            onChange: event => { editSeqRef.current += 1; setNotice(null); setKeywordDraft(event.target.value) },
+            onBlur: () => { setDetection({ extraKeywords: parseKeywordLines(keywordDraft) }) },
           })),
         h('div', { className: 'dshrender-group' },
           h('h3', null, translate('sectionPrompt')),
@@ -2759,7 +2786,12 @@ window.__ModuleLoader__.load({
               className: 'dshrender-checkbox', type: 'checkbox', checked: settings.prompt.enabled,
               onChange: event => { setPrompt({ enabled: event.target.checked }) },
             }))),
-        notice === null ? null : h('p', { className: 'dshrender-note', 'data-kind': notice.kind }, notice.text),
+        notice === null ? null : h('p', {
+          className: 'dshrender-note',
+          'data-kind': notice.kind,
+          role: notice.kind === 'error' ? 'alert' : 'status',
+          'aria-live': notice.kind === 'error' ? 'assertive' : 'polite',
+        }, notice.text),
         h('div', { className: 'dshrender-actions-row' },
           h('button', {
             type: 'button', className: 'dshrender-primary', disabled: busy,
@@ -2783,11 +2815,21 @@ window.__ModuleLoader__.load({
      * @returns {import('react').ReactNode}
      */
     function settingRow(title, hint, control) {
+      const titleId = 'dshrender-row-' + hashString(String(title))
+      const hintId = titleId + '-hint'
+      // Bind the control to its visible title (and hint) so screen readers can
+      // announce the row without a duplicated visually hidden label.
+      const decorated = control !== null && typeof control === 'object' && typeof React.cloneElement === 'function'
+        ? React.cloneElement(control, {
+          'aria-labelledby': titleId,
+          ...(hint === null ? {} : { 'aria-describedby': hintId }),
+        })
+        : control
       return h('div', { className: 'dshrender-row' },
         h('div', { className: 'dshrender-row-copy' },
-          h('span', { className: 'dshrender-row-title' }, title),
-          hint === null ? null : h('span', { className: 'dshrender-row-hint' }, hint)),
-        h('div', { className: 'dshrender-control' }, control))
+          h('span', { className: 'dshrender-row-title', id: titleId }, title),
+          hint === null ? null : h('span', { className: 'dshrender-row-hint', id: hintId }, hint)),
+        h('div', { className: 'dshrender-control' }, decorated))
     }
 
     /* ------------------------------ plugin registration ------------------------------ */
@@ -2798,6 +2840,12 @@ window.__ModuleLoader__.load({
      * @returns {void}
      */
     function apply(ctx) {
+      // A module instance can be reconciled again after the host disabled and
+      // re-enabled the plugin in the same page; never keep the previous
+      // teardown's disposed flag.
+      runtime.disposed = false
+      runtime.settingsReady = false
+      activeRenders = 0
       try {
         if (ctx.locale === undefined || ctx.locale === null || typeof ctx.locale.bind !== 'function') {
           throw new Error('locale service is unavailable')
@@ -2813,23 +2861,56 @@ window.__ModuleLoader__.load({
         }
       }
 
-      applyStyles(runtime.settings)
+      // Prefer the last known settings so the first paint already uses the
+      // user's appearance. Without a cache, defer every enhancement and style
+      // until `/state` answers: applying defaults first and the real settings a
+      // moment later is what makes opening a session visibly shift.
+      const cached = readCachedSettings()
+      if (cached !== null) {
+        runtime.settings = cached
+        runtime.settingsReady = true
+        applyStyles(cached)
+        if (document.body !== null) {
+          scanBlocks(document)
+          scanUserMessages(document)
+        }
+        warmMermaid()
+      }
 
-      // Settings arrive asynchronously; rendering starts with defaults and is
-      // re-evaluated once the Host answers.
       void fetchSettings().then(settings => {
         if (runtime.disposed) return
+        if (settings === null) {
+          // Host unavailable: keep the cached appearance when there is one;
+          // otherwise enable the plugin with defaults instead of staying dark.
+          if (runtime.settingsReady !== true) {
+            runtime.settingsReady = true
+            applyStyles(runtime.settings)
+            if (document.body !== null) {
+              scanBlocks(document)
+              scanUserMessages(document)
+            }
+          }
+          warmMermaid()
+          return
+        }
+        const firstReady = runtime.settingsReady !== true
+        const changed = JSON.stringify(settings) !== JSON.stringify(runtime.settings)
         runtime.settings = settings
-        applyStyles(settings)
-        scanBlocks(document)
-        resetUserMessages()
-        scanUserMessages(document)
+        runtime.settingsReady = true
+        if (firstReady || changed) {
+          applyStyles(settings)
+          resetUserMessages()
+          if (document.body !== null) {
+            scanBlocks(document)
+            scanUserMessages(document)
+          }
+        }
+        writeCachedSettings(settings)
+        warmMermaid()
       })
 
       if (document.body !== null) {
         ctx.effect(() => startObserver(), 'dsh-render: markdown observer')
-        scanBlocks(document)
-        scanUserMessages(document)
       }
 
       ctx.effect(() => {
@@ -2859,6 +2940,13 @@ window.__ModuleLoader__.load({
 
       ctx.effect(() => () => {
         runtime.disposed = true
+        // Close a fullscreen viewer opened by the plugin: it owns body scroll
+        // and document key handlers, so leaving it behind would trap the page.
+        try {
+          if (fullscreenCleanup !== null) fullscreenCleanup()
+        } catch {
+          // Teardown is best-effort.
+        }
         for (const observer of runtime.observers) {
           try {
             observer.disconnect()
@@ -2867,14 +2955,35 @@ window.__ModuleLoader__.load({
           }
         }
         runtime.observers = []
+        while (pendingRenders.length > 0) {
+          const entry = pendingRenders.shift()
+          try { entry?.reject?.(new Error('dsh-render: plugin disposed')) } catch { /* already settled */ }
+        }
+        for (const block of document.querySelectorAll(BLOCK_SELECTOR)) {
+          const state = blockState.get(block)
+          if (state !== undefined && state.timer !== 0) {
+            clearTimeout(state.timer)
+            state.timer = 0
+          }
+          setSourceHidden(block, false)
+          block.removeAttribute('data-dsh-render-enhanced')
+        }
         for (const surface of document.querySelectorAll(SURFACE_SELECTOR)) {
           surface.remove()
         }
         for (const block of document.querySelectorAll(BLOCK_SELECTOR)) {
-          setSourceHidden(block, false)
+          blockState.delete(block)
         }
         resetUserMessages()
-        document.getElementById(STYLE_ID)?.remove()
+        // Every style owned by the plugin goes away, including the separate
+        // appearance sheet (CONTRACT §4.4) and the defensive zoom/typography
+        // sheets older builds may have left behind.
+        for (const styleId of [STYLE_ID, 'dsh-render-appearance', 'dsh-render-zoom', 'dsh-render-typography']) {
+          document.getElementById(styleId)?.remove()
+        }
+        for (const script of document.querySelectorAll('script[data-dsh-render-script="echarts"]')) {
+          script.remove()
+        }
       }, 'dsh-render: teardown')
     }
 
@@ -2884,8 +2993,8 @@ window.__ModuleLoader__.load({
       globalThis.__DSH_RENDER_TEST_EXPORTS__ = {
         mergeSettings, defaultSettings, detectFenceKind, looksLikeCsv, parseCsv,
         parseEchartsOption, splitCsvLine, hashString, firstMeaningfulLine, renderCsvTable,
-        clampZoom, fitTransform, zoomAt, appearanceCss, cleanCustomFont, clampUserMessageMaxHeight, shouldCollapseUserMessage,
-        typographyCss, clampTypographySize, zoomCss, clampUiScale,
+        clampZoom, appearanceCss, cleanCustomFont, clampUserMessageMaxHeight, shouldCollapseUserMessage,
+        clampUiScale, parseKeywordLines,
       }
     }
 

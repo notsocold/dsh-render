@@ -13,12 +13,17 @@
  * mermaid.js bundles and unrelated chunk directories are deliberately skipped.
  *
  * Requirements: Node.js >= 18 (ESM), curl and tar on PATH.
- * Usage: node scripts/sync-vendor.mjs [--keep-temp]
+ * Usage: node scripts/sync-vendor.mjs [--keep-temp] [--self-check]
+ *
+ * The registry must be https and both tarballs are pinned by their npm
+ * `dist.integrity` sha512. `--self-check` validates the registry URL and the
+ * pinned integrity constants without downloading or touching vendor/.
  *
  * This script never reads or writes package.json and never installs packages.
  */
 
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,11 +34,14 @@ const ROOT_DIR = path.resolve(SCRIPT_DIR, '..');
 const VENDOR_DIR = path.join(ROOT_DIR, 'vendor');
 const REGISTRY_BASE = (process.env.NPM_REGISTRY ?? 'https://registry.npmjs.org').replace(/\/+$/, '');
 const KEEP_TEMP = process.argv.includes('--keep-temp');
+const SELF_CHECK = process.argv.includes('--self-check');
 
 const MERMAID = {
   name: 'mermaid',
   version: '12.2.0',
   tarballUrl: `${REGISTRY_BASE}/mermaid/-/mermaid-12.2.0.tgz`,
+  // npm dist.integrity for mermaid@12.2.0; never replace this with a URL-only pin.
+  integrity: 'sha512-w7nr/SFrLO7BaVTs3dQTvYSV6nYSBj0Yy9DjBhsIJtAcHqRzXSq4Pg32ujHZ/AdWsAMNEvvhbm5dt9E2tOiHzw==',
   minChunks: 30,
 };
 
@@ -41,6 +49,8 @@ const ECHARTS = {
   name: 'echarts',
   version: '6.1.0',
   tarballUrl: `${REGISTRY_BASE}/echarts/-/echarts-6.1.0.tgz`,
+  // npm dist.integrity for echarts@6.1.0; never replace this with a URL-only pin.
+  integrity: 'sha512-q0yaFPggC9FUdsWH4blavRWFmxdrIodbkoKNAjJudAI6CA9gNPxHtV2RcZNEepZVlk4yvBYkOkbk6HIVpIyHZA==',
   minBytes: 700_000,
 };
 
@@ -56,6 +66,50 @@ function assertPathInside(baseDir, targetPath) {
   if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`refusing to touch a path outside ${baseDir}: ${targetPath}`);
   }
+}
+
+/**
+ * Refuse a custom registry that downgrades transport security. The tarball hash
+ * check below is the primary integrity control; https keeps it mandatory even
+ * if the script is later changed to trust registry metadata.
+ * @returns {URL} parsed registry URL.
+ */
+function assertSecureRegistry() {
+  let registry;
+  try {
+    registry = new URL(REGISTRY_BASE);
+  } catch {
+    throw new Error(`NPM_REGISTRY is not a valid URL: ${JSON.stringify(REGISTRY_BASE)}`);
+  }
+  if (registry.protocol !== 'https:') {
+    throw new Error(
+      `NPM_REGISTRY must use https: (refusing ${registry.protocol} ${JSON.stringify(REGISTRY_BASE)})`,
+    );
+  }
+  return registry;
+}
+
+/**
+ * Validate that a pinned integrity value is a well-formed sha512 digest.
+ * @param {string} integrity - `sha512-<base64>` value.
+ * @param {string} label - package name for diagnostics.
+ * @returns {void}
+ */
+function assertIntegrity(integrity, label) {
+  const match = /^sha512-([A-Za-z0-9+/]+={0,2})$/.exec(String(integrity));
+  const digest = match?.[1];
+  if (digest === undefined || Buffer.from(digest, 'base64').length !== 64) {
+    throw new Error(`${label}: expected a pinned sha512 integrity value`);
+  }
+}
+
+/**
+ * Compute the npm-style integrity string for a downloaded tarball.
+ * @param {string} file - tarball path.
+ * @returns {string} `sha512-<base64>`.
+ */
+function sha512Integrity(file) {
+  return `sha512-${createHash('sha512').update(fs.readFileSync(file)).digest('base64')}`;
 }
 
 function ensureDir(dir) {
@@ -168,6 +222,17 @@ function downloadAndExtract(spec, tempRoot) {
     throw new Error(`${spec.name}: downloaded tarball is suspiciously small (${tarballBytes} bytes)`);
   }
 
+  // Pin the exact bytes published for this version. The version field alone is
+  // not a security boundary: a mirror or compromised registry could serve a
+  // different tarball with the same package metadata.
+  const actualIntegrity = sha512Integrity(tarball);
+  if (actualIntegrity !== spec.integrity) {
+    throw new Error(
+      `${spec.name}@${spec.version}: tarball integrity mismatch `
+      + `(expected ${spec.integrity}, got ${actualIntegrity})`,
+    );
+  }
+
   const extractDir = ensureDir(path.join(tempRoot, `${spec.name}-extract`));
   console.log(`[vendor] extracting ${spec.name} (${formatBytes(tarballBytes)})`);
   runTool('tar', ['-xzf', tarball, '-C', extractDir]);
@@ -182,6 +247,11 @@ function downloadAndExtract(spec, tempRoot) {
     throw new Error(`${spec.name}: package/package.json is missing from the tarball`);
   }
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  if (manifest.name !== spec.name) {
+    throw new Error(
+      `${spec.name}: expected package ${spec.name}, tarball contains ${manifest.name}`,
+    );
+  }
   if (manifest.version !== spec.version) {
     throw new Error(
       `${spec.name}: expected version ${spec.version}, tarball contains ${manifest.version}`,
@@ -458,7 +528,26 @@ function printReport(packages, chunks) {
 /* Main                                                                       */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Validate the offline part of the supply chain: https registry, well-formed
+ * pinned sha512 values, and https tarball URLs. Never downloads or writes.
+ * @returns {void}
+ */
+function selfCheck() {
+  assertSecureRegistry();
+  for (const spec of [MERMAID, ECHARTS]) {
+    assertIntegrity(spec.integrity, spec.name);
+    const tarball = new URL(spec.tarballUrl);
+    if (tarball.protocol !== 'https:') {
+      throw new Error(`${spec.name}: tarball URL must use https:, got ${tarball.protocol}`);
+    }
+    console.log(`[vendor] self-check ${spec.name}@${spec.version}: sha512 pinned`);
+  }
+  console.log('[vendor] self-check OK');
+}
+
 function main() {
+  assertSecureRegistry();
   ensureDir(VENDOR_DIR);
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-render-vendor-'));
   const stages = [];
@@ -505,4 +594,15 @@ function main() {
   }
 }
 
-main();
+if (SELF_CHECK) {
+  try {
+    selfCheck();
+  } catch (error) {
+    console.error(
+      `\n[vendor] SELF-CHECK FAILED: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  }
+} else {
+  main();
+}

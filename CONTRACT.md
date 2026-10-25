@@ -12,11 +12,11 @@
 | 插件行 id | `dsh-render`（`cordis.patch.yml` 的 `- insert: - id: dsh-render`） |
 | Client 注入服务 | `slots`、`locale` |
 | 设置页 slot | `settings.section`，`id: 'render'`，`order: 31` |
-| DSH 兼容范围 | `engines.dsh: >=0.2.1-rc.2 <0.3.0`（0.2.1-rc.2 实测） |
+| DSH 兼容范围 | `engines.dsh: >=0.2.1-rc.2 <0.3.0`（0.2.1-rc.2 / rc.3 实测） |
 
 ## 2. 设置文档
 
-路径：`$DSH_HOME/dsh-render/settings.json`（`DSH_HOME` 缺省为 `~`）。
+路径：`$DSH_HOME/dsh-render/settings.json`（`DSH_HOME` 缺省为 `~/.dsh`）。
 
 ```json
 {
@@ -42,7 +42,7 @@
     "customCodeFont": "",
     "codeFontSize": 0,
     "codeLineHeight": 0,
-    "codeLigatures": false
+    "codeLigatures": false,
     "collapseUserMessages": true,
     "userMessageMaxHeight": 360
   },
@@ -76,13 +76,15 @@
 - `typography.codeFontSize`：`0` 或 `[10, 16]`；
 - `typography.terminalFontSize`：`0` 或 `[10, 20]`；
 - `uiScale`：`[0.8, 1.3]`，默认 `1`（100%），按 0.01 取整；
-- `typography` 与 `uiScale` 目前是保留字段：界面不再暴露入口，也不会应用（通用页相关功能已撤销）。
+- `typography` 与 `uiScale` 是保留字段：界面不再暴露入口，客户端也不会应用（通用页相关功能已撤销）；Host 仍归一化这两个字段，保证旧设置文件可读且往返不丢数据。
 - 未知字段丢弃；缺失字段用默认值补齐；
 - 文件损坏时备份为 `settings.json.bak-<timestamp>` 并回退默认值。
 
 ## 3. HTTP 路由
 
-全部通过 `ctx.connection.fetch.register()` 注册，位于认证 `/api` 围栏内，仅页面 owner 可访问。无 `connection` 服务的 profile（headless/CLI）跳过注册，不报错。
+- `/state`、`/action` 通过 `ctx.connection.fetch.register()` 注册，位于认证 `/api` 围栏内，仅页面 owner 可访问；
+- `/vendor/*` 需要子树匹配，而 `connection.fetch` 只支持精确 pathname，因此由 `ctx.webServer.register({ kind: 'prefix' })` 注册，并在 handler 内调用 `ctx.connection.requestRejection(request)` 复用同一套认证围栏；未授权请求先写 401/403，再触碰文件系统；
+- 无 `connection` / `webServer` 服务的 profile（headless/CLI）跳过对应注册，不报错。
 
 ### 3.1 `GET /api/dsh-render/state`
 
@@ -160,7 +162,7 @@
 - 只允许扩展名 `.mjs`、`.js`、`.json`、`.map`、`.css`，以及文件名 `VERSION`、`LICENSE`；
 - 目录请求返回 404；
 - Content-Type：`.mjs`/`.js` → `text/javascript; charset=utf-8`，`.json`/`.map` → `application/json; charset=utf-8`，`.css` → `text/css; charset=utf-8`，其余 `application/octet-stream`；
-- `cache-control: public, max-age=31536000, immutable`；
+- 缓存：入口文件（Mermaid `dist/mermaid.esm.min.mjs`、ECharts `echarts.min.js`）返回 `private, no-cache`，保证升级后入口重新验证、不会引用已删除的旧 chunk；其余 chunk 返回 `private, max-age=31536000, immutable`（认证资源不进共享缓存）；
 - 文件不存在 404，读取失败 500。
 
 客户端实际使用的入口（与 `state.vendor.mermaid.entry` 一致；prefix handler 对缺少 `dist/` 的写法也做一次回退解析）：
@@ -171,6 +173,8 @@
 ## 4. Web 半 DOM 契约
 
 ### 4.1 识别锚点
+
+识别前先读代码卡片 banner 暴露的语言标签：命中常见编程/标记语言（`python`、`js`、`ts`、`bash`、`html`、`css`、`sql`、`yaml`、`markdown`、`text` 等）时保持原生代码块；`json`、`csv`、`echarts`、`mermaid` 不在排除集合内，仍走结构检测。没有语言标签时，结构成立的 CSV 先于 Mermaid 首行关键字识别（例如表头 `graph,score` 渲染为表格）；Mermaid 首行关键字后紧跟 `=` 或 `,` 时不算图。
 
 宿主 `CodeBlock` 的 DOM：
 
@@ -241,9 +245,11 @@
 - 由 `client.js` 的 `appearanceCss(settings)` 生成，写入 `<style id="dsh-render-appearance">`，与渲染器样式 `<style id="dsh-render-styles">` 分离；
 - 作用域：`:is([data-chat-flow], [data-document-markdown])`，不触碰设置页、插件 UI 或其它宿主区域；
 - 代码字体/字号/行高/连字：作用于 `.md-code-block pre`、`.md-code-block code`、`:not(pre) > code`；`codeFontSize=0` / `codeLineHeight=0` 时沿用 DSH 外观设置（`--dsh-code-font-size`、`--dsw-font-markdown-code-block`）；
+- 代码块边框与 banner 分隔线同样限定在 `:is([data-chat-flow], [data-document-markdown])` 作用域内，不触碰工具详情、计划预览等其它 Markdown 区域；
+- 链接与文件引用：Markdown 区域内普通链接（`a[href]`）以及文件提及/文件链接（`button`/`a` 的 `fileMention`/`fileLink` 类，按类名子串匹配）常驻 1.5px 虚线下划线（`--dsw-alias-link` 76% 混合色、offset 3px）；`hover` / `focus-visible` 时加粗到 2px、改用完整 link 色、offset 4px；不改变链接文字颜色，也不影响设置页与插件 UI。
 - 行内 code：`inlineCode=claude` 时保留 **蓝色文字并加深**（亮 `color-mix(--dsw-alias-link 84%, #000 16%)` / 暗 `--dsw-alias-link`）、灰色底（亮 `rgba(0,0,0,.055)` / 暗 `rgba(255,255,255,.09)`）、**1px 灰色描边**（`--dsw-alias-border-l2`，比背景更深）、`font-weight:400`（不加粗）、4px 圆角；代码块内 `pre code` 重置为透明/无边框/常规字重；
 - 代码块：`codeBlock=claude|minimal` 时 `.md-code-block` 加 **1px `--dsw-alias-border-l2`** 边框 + 10px 圆角；`claude` 额外给 `[data-code-block-banner]` 底部分隔线（同色）；
-- 表格：`table=claude` 时给 `[data-chat-flow] table` / `[data-document-markdown] table` 应用 **Claude 风格**：1px 外框（`--dsw-alias-border-l2`，比 `l1` 稍深）、10px 圆角、表头半透明灰底（亮 `rgba(0,0,0,.05)` / 暗 `rgba(255,255,255,.07)`，另以 `color-mix(label-primary 6%)` 兜底）、表头 `label-primary` + 600 字重（避免次级文字色在浅灰底上显得发虚）、表头底部 1px `--dsw-alias-border-l2`、行间 1px `--dsw-alias-border-l2`、`8px 12px` 内边距、顶部对齐、行高 1.5、无竖线、**无行悬停**；**字号使用 `var(--dsh-content-font-size, 14px)`，随设置 → 外观的通用字号变化**（表格内 code 为 `0.9em` 随表格缩放）；**所有表格强制适应会话列宽**：直接包含表格的外层 `div:has(> table)` 先强制 `width:100%`（否则它作为 flex item 会收缩到内容宽，令表格的 100% 失去参照），表格再用 `width:100%` + `max-width:100%` + `table-layout:fixed` + `box-sizing:border-box`，列宽等分，单元格 `white-space:normal` + `overflow-wrap:anywhere` 允许严重换行，长 URL/行内 code 也可断行；宽表外层 `.md-table-wide` 用 `overflow-x:auto`（覆盖宿主悬停时的 `overflow-x:scroll`，无溢出时不显示滚动条），保证表格不超出会话宽度；CSV 表格（`.dshrender-table`）落在同一作用域内，随之统一；
+- 表格：`table=claude` 时给 `[data-chat-flow] table` / `[data-document-markdown] table` 应用 **Claude 风格**：1px 外框（`--dsw-alias-border-l2`，比 `l1` 稍深）、10px 圆角、表头半透明灰底（亮 `rgba(0,0,0,.05)` / 暗 `rgba(255,255,255,.07)`，另以 `color-mix(label-primary 6%)` 兜底）、表头 `label-primary` + 600 字重（避免次级文字色在浅灰底上显得发虚）、表头底部 1px `--dsw-alias-border-l2`、行间 1px `--dsw-alias-border-l2`、`8px 12px` 内边距、顶部对齐、行高 1.5、无竖线、**无行悬停**；**字号使用 `var(--dsh-content-font-size, 14px)`，随设置 → 外观的通用字号变化**（表格内 code 为 `0.9em` 随表格缩放）；**所有表格强制适应会话列宽**：直接包含表格的外层 `div:has(> table)` 先强制 `width:100%`（否则它作为 flex item 会收缩到内容宽，令表格的 100% 失去参照），表格再用 `width:100%` + `max-width:100%` + `table-layout:fixed` + `box-sizing:border-box`，列宽等分，单元格 `white-space:normal` + `overflow-wrap:anywhere` 允许严重换行，长 URL/行内 code 也可断行；宽表外层 `.md-table-wide` 用 `overflow-x:hidden`（覆盖宿主悬停时的 `overflow-x:scroll`），表格强制适应用会话宽度、不出现横向滚动；CSV 表格（`.dshrender-table`）落在同一作用域内，随之统一；
 - 所有样式均限定在 Markdown 区域，插件禁用时随 `dsh-render-appearance` 一起移除。
 
 ### 4.5 长用户消息折叠
@@ -257,10 +263,10 @@
 
 ### 4.6 生命周期
 
-- 启动：`apply(ctx)` 注册 locale、注入样式、启动 `MutationObserver`（`document.body`，`childList/subtree/characterData/attributes[data-ds-dark-theme]`）、启动 4s 周期清扫；
-- 设置加载：`GET /state` 成功后更新内存设置并重扫；
-- 设置保存：`POST /action` 成功后立即重扫；
-- 清理：`ctx.effect` 返回值断开 observer、移除所有 surface、恢复源码显示、移除样式标签；插件禁用/页面刷新后页面恢复原生代码块。
+- 启动：`apply(ctx)` 注册 locale；优先读取 localStorage 缓存 `dsh-render:settings-v1`，命中则先应用样式并扫描页面；无缓存时不应用外观、不增强任何区块，等 `GET /state` 返回后一次性应用并全量扫描（避免先用默认设置渲染、再被用户设置重排的二次抖动）；随后启动 `MutationObserver`（`document.body`，`childList/subtree/characterData/attributes[data-ds-dark-theme]`）与 4s 周期清扫；
+- 设置加载：`GET /state` 成功后更新内存设置并写缓存；与当前内存设置不同（或此前无缓存）时应用样式并重扫；
+- 设置保存：`POST /action` 成功后立即重扫并更新缓存；
+- 清理：`ctx.effect` 返回值断开 observer、关闭全屏查看器（恢复 body 滚动与焦点）、清空渲染队列与定时器、移除所有 surface、恢复源码显示、移除全部样式标签（`dsh-render-styles` 与 `dsh-render-appearance`）；插件禁用/页面刷新后页面恢复原生代码块，模块再次 apply 时复位 disposed 状态。
 
 ## 5. 安全契约
 

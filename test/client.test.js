@@ -120,27 +120,10 @@ test('renderCsvTable escapes every cell', () => {
   assert.match(html, /&quot;quoted&quot;/)
 })
 
-test('fitTransform centers and scales content inside the viewport', () => {
-  const fitted = helpers.fitTransform(400, 200, 1000, 600)
-  assert.ok(Math.abs(fitted.scale - 2.35) < 1e-9, 'scale uses the limiting axis')
-  assert.ok(Math.abs(fitted.x - 30) < 1e-9, 'content is horizontally centered')
-  assert.ok(Math.abs(fitted.y - 65) < 1e-9, 'content is vertically centered')
-})
-
-test('fitTransform guards empty sizes and clampZoom bounds external scales', () => {
-  assert.deepEqual({ ...helpers.fitTransform(0, 200, 1000, 600) }, { scale: 1, x: 0, y: 0 })
+test('clampZoom bounds the fullscreen viewer scale', () => {
   assert.equal(helpers.clampZoom(0.001), 0.02)
   assert.equal(helpers.clampZoom(999), 20)
   assert.equal(helpers.clampZoom(Number.NaN), 1)
-})
-
-test('zoomAt keeps the pointer anchor fixed', () => {
-  const next = helpers.zoomAt({ scale: 1, x: 100, y: 50 }, 2, 300, 200)
-  assert.equal(next.scale, 2)
-  assert.equal(next.x, -100)
-  assert.equal(next.y, -100)
-  assert.equal((300 - next.x) / next.scale, 200, 'anchor X stays over the same content point')
-  assert.equal((200 - next.y) / next.scale, 150, 'anchor Y stays over the same content point')
 })
 
 test('mergeSettings normalizes the appearance group', () => {
@@ -191,13 +174,17 @@ test('appearanceCss scopes the Claude styles to Markdown regions', () => {
   assert.match(css, /background:rgba\(0,0,0,\.055\)/)
   assert.match(css, /font-weight:600/)
   assert.match(css, /font-weight:400/)
+  assert.match(css, /text-decoration-line: underline !important; text-decoration-style: dotted !important/)
+  assert.match(css, /class\*="fileMention"/)
+  assert.match(css, /class\*="fileLink"/)
+  assert.match(css, /text-decoration-thickness: 2px !important/)
   assert.match(css, /table-layout:fixed !important/)
   assert.match(css, /box-sizing:border-box !important/)
-  assert.match(css, /overflow-wrap:anywhere/)
   assert.match(css, /div:has\(> table\) \{ width:100% !important; max-width:100% !important; \}/)
   assert.match(css, /width:var\(--dsh-chat-content-width, 100%\) !important/)
   assert.match(css, /margin-left:0 !important; padding-left:0 !important; overflow-x:hidden !important/)
   assert.match(css, /\.md-table-wide \{ width:100% !important; max-width:100% !important; margin-left:0 !important; padding-left:0 !important; overflow-x:hidden !important; padding-bottom:0 !important; \}/)
+  assert.match(css, /overflow-wrap:anywhere/)
   assert.match(css, /--dsw-alias-link/)
   assert.match(css, /border:1px solid var\(--dsw-alias-border-l2/)
   assert.match(css, /table \{ border-collapse:separate; border-spacing:0; border:1px solid var\(--dsw-alias-border-l2/)
@@ -210,7 +197,8 @@ test('appearanceCss scopes the Claude styles to Markdown regions', () => {
   const plain = helpers.appearanceCss(helpers.mergeSettings({
     appearance: { inlineCode: 'dsh', table: 'dsh', codeBlock: 'dsh' },
   }, defaults))
-  assert.doesNotMatch(plain, /--dsw-alias-link/)
+  assert.doesNotMatch(plain, /:not\(pre\) > code \{ color:color-mix/)
+  assert.match(plain, /text-decoration-style: dotted !important/)
   assert.doesNotMatch(plain, /background:rgba\(0,0,0,\.055\)/)
   assert.doesNotMatch(plain, /\.md-code-block \{ border/)
 })
@@ -232,28 +220,11 @@ test('appearanceCss applies code font overrides and custom stacks', () => {
   assert.match(css, /font-variant-ligatures:normal;/)
 })
 
-test('typographyCss emits body variable overrides for the General page', () => {
-  const settings = helpers.mergeSettings({
-    typography: { textFontFamily: '"My UI", sans-serif', textFontSize: 18, codeFontSize: 0, terminalFontSize: 14 },
-  }, helpers.defaultSettings())
-  const css = helpers.typographyCss(settings)
-  assert.match(css, /^body \{/)
-  assert.match(css, /--dsh-font-family-text:"My UI", sans-serif !important;/)
-  assert.match(css, /--dsh-content-font-size:18px !important;/)
-  assert.doesNotMatch(css, /--dsh-code-font-size/)
-  assert.match(css, /--dsh-terminal-font-size:14px !important;/)
-  assert.equal(helpers.typographyCss(helpers.defaultSettings()), '')
-  assert.equal(helpers.clampTypographySize(5, 10, 22), 10)
-  assert.equal(helpers.clampTypographySize(0, 10, 22), 0)
-  assert.equal(helpers.clampTypographySize(99, 10, 22), 22)
-})
-
-test('zoomCss emits a body zoom rule and clamps the scale', () => {
-  assert.equal(helpers.zoomCss(helpers.defaultSettings()), '')
-  const zoomed = helpers.mergeSettings({ uiScale: 1.15 }, helpers.defaultSettings())
-  assert.equal(helpers.zoomCss(zoomed), 'body { zoom: 1.15; }')
+test('clampUiScale keeps the reserved uiScale field in range', () => {
   assert.equal(helpers.clampUiScale(2), 1.3)
   assert.equal(helpers.clampUiScale(0.5), 0.8)
+  const merged = helpers.mergeSettings({ uiScale: 1.15 }, helpers.defaultSettings())
+  assert.equal(merged.uiScale, 1.15)
 })
 
 test('shouldCollapseUserMessage only folds bubbles taller than the threshold', () => {
@@ -267,4 +238,34 @@ test('shouldCollapseUserMessage only folds bubbles taller than the threshold', (
 test('hashString is stable and distinguishes content', () => {
   assert.equal(helpers.hashString('flowchart TD\nA-->B'), helpers.hashString('flowchart TD\nA-->B'))
   assert.notEqual(helpers.hashString('a'), helpers.hashString('b'))
+})
+
+test('detectFenceKind uses the banner language and rejects assignment-like heads', () => {
+  // A Python fence whose first line starts with a Mermaid keyword must stay code.
+  assert.equal(helpers.detectFenceKind('graph = nx.Graph()\nfor n in g: pass', 'python'), null)
+  assert.equal(helpers.detectFenceKind('pie = 3.14\nprint(pie)', 'python'), null)
+  assert.equal(helpers.detectFenceKind('graph = nx.Graph()\nfor n in g: pass'), null)
+  assert.equal(helpers.detectFenceKind('pie = 3.14\nprint(pie)'), null)
+  // The same head is a diagram when no code language is declared.
+  assert.equal(helpers.detectFenceKind('flowchart TD\nA-->B', 'mermaid'), 'mermaid')
+  // JSON/CSV/echarts fences still go through the structural detectors.
+  assert.equal(helpers.detectFenceKind('{"xAxis":{},"series":[]}', 'json'), 'echarts')
+  assert.equal(helpers.detectFenceKind('a,b\n1,2\n3,4', 'csv'), 'csv')
+})
+
+test('detectFenceKind prefers structured CSV over the Mermaid head heuristic', () => {
+  assert.equal(helpers.detectFenceKind('graph,score\nA,1\nB,2'), 'csv')
+  assert.equal(helpers.detectFenceKind('graph,score\nA,1\nB,2'), 'csv')
+  assert.equal(helpers.detectFenceKind('pie,value\nA,3\nB,4'), 'csv')
+  assert.equal(helpers.detectFenceKind('flowchart TD\nA-->B\nB-->C'), 'mermaid')
+})
+
+test('parseKeywordLines trims, dedupes, drops over-long lines, and caps the list', () => {
+  assert.deepEqual(
+    [...helpers.parseKeywordLines('  init  \n\ninit\n' + 'x'.repeat(80) + '\n foo ')],
+    ['init', 'foo'],
+  )
+  assert.equal(helpers.parseKeywordLines('').length, 0)
+  const many = Array.from({ length: 60 }, (_, index) => 'k' + index).join('\n')
+  assert.equal(helpers.parseKeywordLines(many).length, 50)
 })

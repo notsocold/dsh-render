@@ -6,11 +6,14 @@
  */
 
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
+import * as hostPlugin from '../index.js'
 import { promptText, installPromptSection } from '../lib/prompt.js'
 import { apiRoutes, createVendorWebRoute } from '../lib/routes.js'
 import {
@@ -25,6 +28,9 @@ import {
   vendorRoots,
   vendorStatus,
 } from '../lib/vendor.js'
+
+/** Plugin package root, used by the index and sync-vendor tests. */
+const PLUGIN_ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /**
  * @returns {Promise<string>} a fresh temporary directory.
@@ -70,6 +76,11 @@ function responseRecorder() {
 function nodeRequest(request) {
   return { method: 'GET', headers: {}, ...request }
 }
+
+test('index.js imports cleanly and exposes the Host plugin shape', () => {
+  assert.equal(hostPlugin.name, 'dsh-render')
+  assert.equal(typeof hostPlugin.apply, 'function')
+})
 
 test('defaultSettings exposes the documented complete shape', () => {
   assert.deepEqual(defaultSettings(), {
@@ -436,6 +447,64 @@ test('SettingsStore preserves a corrupt file and falls back to defaults', async 
   }
 })
 
+test('SettingsStore serializes concurrent mutations in submission order', async () => {
+  const home = await tempDir()
+  try {
+    const store = new SettingsStore({ home })
+    await store.load()
+
+    const [first, second] = await Promise.all([
+      store.set({ mermaid: { theme: 'dark' } }),
+      store.set({ csv: { enabled: false } }),
+    ])
+    assert.equal(first.mermaid.theme, 'dark')
+    assert.equal(first.csv.enabled, true)
+    assert.equal(second.mermaid.theme, 'dark', 'the second patch merges over the first write')
+    assert.equal(second.csv.enabled, false)
+
+    const final = store.get()
+    assert.equal(final.mermaid.theme, 'dark')
+    assert.equal(final.csv.enabled, false)
+    assert.deepEqual(JSON.parse(await readFile(store.settingsPath, 'utf8')), final)
+
+    // reset() shares the queue: it runs after the set() submitted before it.
+    const [, reset] = await Promise.all([
+      store.set({ mermaid: { theme: 'light' } }),
+      store.reset(),
+    ])
+    assert.deepEqual(reset, defaultSettings())
+    assert.deepEqual(store.get(), defaultSettings())
+    assert.deepEqual(JSON.parse(await readFile(store.settingsPath, 'utf8')), defaultSettings())
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('SettingsStore falls back to defaults when the document cannot be read', async () => {
+  const home = await tempDir()
+  try {
+    const messages = []
+    const store = new SettingsStore({ home, logger: { warn: message => messages.push(message) } })
+
+    // A directory at the settings path produces a non-ENOENT read error on
+    // every supported platform: load() must degrade instead of taking the
+    // whole Host plugin down.
+    await mkdir(store.settingsPath, { recursive: true })
+    assert.deepEqual(await store.load(), defaultSettings())
+    assert.equal(store.loaded, true)
+    assert.ok(messages.some(message => message.includes('cannot read')))
+
+    // Writes must still surface io-error and keep the in-memory document.
+    await assert.rejects(
+      store.set({ mermaid: { theme: 'dark' } }),
+      error => error?.code === 'io-error',
+    )
+    assert.deepEqual(store.get(), defaultSettings(), 'a failed write leaves memory untouched')
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
 test('apiRoutes returns the documented state document', async () => {
   const home = await tempDir()
   try {
@@ -535,7 +604,7 @@ test('action route merges settings, resets, and rejects invalid requests', async
   }
 })
 
-test('vendor web route serves whitelisted files with immutable caching', async () => {
+test('vendor web route serves whitelisted files with the entry/chunk cache policy', async () => {
   const pluginDir = await tempDir()
   try {
     const mermaidDist = join(pluginDir, 'vendor', 'mermaid', 'dist')
@@ -562,17 +631,18 @@ test('vendor web route serves whitelisted files with immutable caching', async (
     )
     assert.equal(entry.record.status, 200)
     assert.equal(entry.record.headers['content-type'], 'text/javascript; charset=utf-8')
-    assert.equal(entry.record.headers['cache-control'], 'public, max-age=31536000, immutable')
+    assert.equal(entry.record.headers['cache-control'], 'private, no-cache')
     assert.equal(String(entry.record.body), 'export const mermaid = true\n')
 
     // The browser may also ask for the entry without the retained `dist/`
-    // segment; the route falls back to the same file.
+    // segment; the route falls back to the same file and cache policy.
     const flatEntry = responseRecorder()
     await route.handler(
       nodeRequest({ url: '/api/dsh-render/vendor/mermaid/mermaid.esm.min.mjs' }),
       flatEntry,
     )
     assert.equal(flatEntry.record.status, 200)
+    assert.equal(flatEntry.record.headers['cache-control'], 'private, no-cache')
     assert.equal(String(flatEntry.record.body), 'export const mermaid = true\n')
 
     // Nested chunks resolve through the retained `dist/` layout.
@@ -582,6 +652,7 @@ test('vendor web route serves whitelisted files with immutable caching', async (
       chunk,
     )
     assert.equal(chunk.record.status, 200)
+    assert.equal(chunk.record.headers['cache-control'], 'private, max-age=31536000, immutable')
     assert.equal(String(chunk.record.body), 'export const chunk = 1\n')
 
     const flatChunk = responseRecorder()
@@ -590,6 +661,7 @@ test('vendor web route serves whitelisted files with immutable caching', async (
       flatChunk,
     )
     assert.equal(flatChunk.record.status, 200)
+    assert.equal(flatChunk.record.headers['cache-control'], 'private, max-age=31536000, immutable')
     assert.equal(String(flatChunk.record.body), 'export const chunk = 1\n')
 
     const echarts = responseRecorder()
@@ -599,6 +671,7 @@ test('vendor web route serves whitelisted files with immutable caching', async (
     )
     assert.equal(echarts.record.status, 200)
     assert.equal(echarts.record.headers['content-type'], 'text/javascript; charset=utf-8')
+    assert.equal(echarts.record.headers['cache-control'], 'private, no-cache')
     assert.equal(String(echarts.record.body), '/* echarts */\n')
 
     const missing = [
@@ -649,6 +722,147 @@ test('vendor web route serves whitelisted files with immutable caching', async (
   } finally {
     await rm(pluginDir, { recursive: true, force: true })
   }
+})
+
+test('vendor web route revalidates entries but caches non-entry files immutably', async () => {
+  const pluginDir = await tempDir()
+  try {
+    const mermaidDist = join(pluginDir, 'vendor', 'mermaid', 'dist')
+    await mkdir(join(mermaidDist, 'chunks'), { recursive: true })
+    await writeFile(join(mermaidDist, 'mermaid.esm.min.mjs'), 'export const mermaid = true\n')
+    await writeFile(join(mermaidDist, 'chunks', 'chunk-1.mjs'), 'export const chunk = 1\n')
+    await mkdir(join(pluginDir, 'vendor', 'echarts'), { recursive: true })
+    await writeFile(join(pluginDir, 'vendor', 'echarts', 'echarts.min.js'), '/* echarts */\n')
+
+    const route = createVendorWebRoute({
+      vendorRoots: vendorRoots(pluginDir),
+      authorize: () => true,
+      logger: { warn() {} },
+    })
+    /** @param {string} url - vendor URL. */
+    const get = async url => {
+      const response = responseRecorder()
+      await route.handler(nodeRequest({ url }), response)
+      return response.record
+    }
+
+    const entries = [
+      ['canonical mermaid entry', await get('/api/dsh-render/vendor/mermaid/dist/mermaid.esm.min.mjs')],
+      ['flat mermaid entry', await get('/api/dsh-render/vendor/mermaid/mermaid.esm.min.mjs')],
+      ['echarts entry', await get('/api/dsh-render/vendor/echarts/echarts.min.js')],
+    ]
+    for (const [label, record] of entries) {
+      assert.equal(record.status, 200, label)
+      assert.equal(record.headers['cache-control'], 'private, no-cache', label)
+    }
+
+    const chunks = [
+      ['canonical chunk', await get('/api/dsh-render/vendor/mermaid/dist/chunks/chunk-1.mjs')],
+      ['flat chunk', await get('/api/dsh-render/vendor/mermaid/chunks/chunk-1.mjs')],
+    ]
+    for (const [label, record] of chunks) {
+      assert.equal(record.status, 200, label)
+      assert.equal(
+        record.headers['cache-control'],
+        'private, max-age=31536000, immutable',
+        label,
+      )
+    }
+  } finally {
+    await rm(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('vendor web route applies 401/403 authorization before method or filesystem', async () => {
+  const pluginDir = await tempDir()
+  try {
+    // No vendor tree is created: a rejected request must answer before any
+    // stat/read, and authorization must win over the non-GET 405 branch.
+    for (const status of [401, 403]) {
+      const body = status === 401 ? 'unauthorized' : 'forbidden'
+      const route = createVendorWebRoute({
+        vendorRoots: vendorRoots(pluginDir),
+        authorize: (_request, response) => {
+          response.writeHead(status, { 'cache-control': 'no-store' })
+          response.end(body)
+          return false
+        },
+        logger: { warn() {} },
+      })
+      const response = responseRecorder()
+      await route.handler(
+        nodeRequest({ method: 'POST', url: '/api/dsh-render/vendor/echarts/echarts.min.js' }),
+        response,
+      )
+      assert.equal(response.record.status, status)
+      assert.equal(response.record.headers['cache-control'], 'no-store')
+      assert.equal(String(response.record.body), body)
+    }
+  } finally {
+    await rm(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('vendor web route rejects unknown paths, directories, and non-GET methods', async () => {
+  const pluginDir = await tempDir()
+  try {
+    const mermaidDist = join(pluginDir, 'vendor', 'mermaid', 'dist')
+    await mkdir(join(mermaidDist, 'dir.js'), { recursive: true })
+    await writeFile(join(mermaidDist, 'mermaid.esm.min.mjs'), 'export const mermaid = true\n')
+
+    const route = createVendorWebRoute({
+      vendorRoots: vendorRoots(pluginDir),
+      authorize: () => true,
+      logger: { warn() {} },
+    })
+    /** @param {string} method - HTTP method. @param {string} url - request URL. */
+    const request = async (method, url) => {
+      const response = responseRecorder()
+      await route.handler(nodeRequest({ method, url }), response)
+      return response.record
+    }
+
+    assert.equal((await request('GET', '/api/dsh-render/vendor/mermaid/missing.mjs')).status, 404)
+    assert.equal((await request('GET', '/api/dsh-render/vendor/unknown/file.js')).status, 404)
+    assert.equal((await request('GET', '/api/dsh-render/vendor/mermaid/dist/dir.js')).status, 404)
+    assert.equal((await request('GET', '/api/dsh-render/vendor/mermaid')).status, 404)
+
+    const notAllowed = await request('POST', '/api/dsh-render/vendor/echarts/echarts.min.js')
+    assert.equal(notAllowed.status, 405)
+    assert.equal(notAllowed.headers.allow, 'GET')
+  } finally {
+    await rm(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('sync-vendor self-check enforces https and pinned sha512 integrity', () => {
+  const scriptPath = join(PLUGIN_ROOT, 'scripts', 'sync-vendor.mjs')
+  const source = readFileSync(scriptPath, 'utf8')
+  assert.ok(
+    source.includes('sha512-w7nr/SFrLO7BaVTs3dQTvYSV6nYSBj0Yy9DjBhsIJtAcHqRzXSq4Pg32ujHZ/AdWsAMNEvvhbm5dt9E2tOiHzw=='),
+    'mermaid@12.2.0 integrity is pinned',
+  )
+  assert.ok(
+    source.includes('sha512-q0yaFPggC9FUdsWH4blavRWFmxdrIodbkoKNAjJudAI6CA9gNPxHtV2RcZNEepZVlk4yvBYkOkbk6HIVpIyHZA=='),
+    'echarts@6.1.0 integrity is pinned',
+  )
+  assert.ok(source.includes('manifest.name !== spec.name'), 'package name is checked')
+  assert.ok(source.includes("createHash('sha512')"), 'downloads are hashed with sha512')
+  assert.ok(source.includes("protocol !== 'https:'"), 'registry transport is enforced')
+
+  const ok = spawnSync(process.execPath, [scriptPath, '--self-check'], {
+    encoding: 'utf8',
+    env: { ...process.env, NPM_REGISTRY: 'https://registry.npmjs.org' },
+  })
+  assert.equal(ok.status, 0, ok.stderr)
+  assert.match(ok.stdout, /self-check OK/)
+
+  const insecure = spawnSync(process.execPath, [scriptPath, '--self-check'], {
+    encoding: 'utf8',
+    env: { ...process.env, NPM_REGISTRY: 'http://registry.npmjs.org' },
+  })
+  assert.notEqual(insecure.status, 0)
+  assert.match(insecure.stderr, /https:/)
 })
 
 test('prompt section is dynamic and emits nothing while disabled', () => {
