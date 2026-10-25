@@ -1152,6 +1152,36 @@ window.__ModuleLoader__.load({
     let renderSequence = 0
 
     /**
+     * Off-screen host for Mermaid's scratch DOM.
+     *
+     * Mermaid mounts a temporary wrapper into the container it is given, or into
+     * `<body>` when no container is given. A body-level wrapper is a normal-flow
+     * block: while a diagram renders it makes the document taller than the
+     * viewport, the browser shows a root scrollbar, and the whole shell shifts
+     * sideways by one scrollbar width before snapping back. This fixed host is
+     * still measurable (Mermaid needs layout and getBBox) but contributes
+     * nothing to the document's scrollable area.
+     * @returns {HTMLElement}
+     */
+    function createMermaidHost() {
+      const root = document.documentElement
+      const host = document.createElement('div')
+      host.setAttribute('data-dsh-render-mermaid-host', '')
+      host.style.cssText = [
+        'position:fixed',
+        'left:-100000px',
+        'top:0',
+        'width:' + Math.max(1, root.clientWidth) + 'px',
+        'height:' + Math.max(1, root.clientHeight) + 'px',
+        'overflow:hidden',
+        'visibility:hidden',
+        'pointer-events:none',
+      ].join(';')
+      ;(document.body ?? root).appendChild(host)
+      return host
+    }
+
+    /**
      * Render Mermaid code into an SVG string.
      * @param {string} source - mermaid source.
      * @param {'light' | 'dark'} theme - resolved theme.
@@ -1166,6 +1196,7 @@ window.__ModuleLoader__.load({
         const api = await configureMermaid(theme)
         renderSequence += 1
         const id = 'dsh-render-mermaid-' + renderSequence
+        const host = createMermaidHost()
         let timer = 0
         // A real timer handle: clear it as soon as the render settles so a
         // slow-but-successful diagram cannot both succeed and time out.
@@ -1173,7 +1204,7 @@ window.__ModuleLoader__.load({
           timer = setTimeout(() => reject(new Error('mermaid render timed out')), RENDER_TIMEOUT_MS)
         })
         try {
-          const result = await Promise.race([api.render(id, source), timeout])
+          const result = await Promise.race([api.render(id, source, host), timeout])
           const svg = result?.svg
           if (typeof svg !== 'string' || svg.trim() === '') throw new Error('mermaid returned no SVG')
           cacheSet(cacheKey, svg)
@@ -1187,6 +1218,13 @@ window.__ModuleLoader__.load({
               const leftover = document.getElementById(leftoverId)
               if (leftover !== null) leftover.remove()
             }
+          } catch {
+            // Cleanup is best-effort.
+          }
+          try {
+            // The host is fixed and off-screen, so dropping it can never move the
+            // page; it only releases a scratch subtree left behind by a timeout.
+            host.remove()
           } catch {
             // Cleanup is best-effort.
           }
@@ -1788,14 +1826,55 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------ enhancement engine ------------------------------ */
 
-    /** @type {WeakMap<HTMLElement, { timer: number, token: number, theme: string, hash: string, kind: string }>} */
+    /** @type {WeakMap<HTMLElement, { timer: number, token: number, theme: string, hash: string, kind: string, batch: object | null }>} */
     const blockState = new WeakMap()
+
+    /**
+     * Batch of render results that are committed to the DOM in one task.
+     *
+     * Replacing every diagram of one scan batch together makes the transcript
+     * change height once, so the host's follow-tail scroll correction runs once
+     * instead of once per diagram — which otherwise reads as a small vertical
+     * jitter while a session opens. `pending` counts the started render jobs;
+     * the batch flushes when they all settle, or at the timeout so one slow
+     * diagram cannot hold the rest.
+     * @returns {{ pending: number, commits: Function[], timer: number, closed: boolean }}
+     */
+    function createCommitBatch() {
+      return { pending: 0, commits: [], timer: 0, closed: false }
+    }
+
+    /** @param {{ pending: number, commits: Function[], timer: number, closed: boolean }} batch - batch losing one job. */
+    function settleCommitBatch(batch) {
+      if (batch.pending > 0) batch.pending -= 1
+      if (batch.pending === 0) flushCommitBatch(batch)
+    }
+
+    /** @param {{ pending: number, commits: Function[], timer: number, closed: boolean }} batch - batch to commit. */
+    function flushCommitBatch(batch) {
+      if (batch.closed) return
+      batch.closed = true
+      if (batch.timer !== 0) {
+        clearTimeout(batch.timer)
+        batch.timer = 0
+      }
+      const commits = batch.commits
+      batch.commits = []
+      for (const commit of commits) {
+        try {
+          commit()
+        } catch {
+          // One bad commit must not drop the rest of the batch.
+        }
+      }
+    }
 
     /**
      * Render (or re-render) one block's surface.
      * @param {HTMLElement} block - `.md-code-block` element.
+     * @param {{ pending: number, commits: Function[], timer: number, closed: boolean } | null} commitBatch - batch the result should commit with.
      */
-    function enhanceBlock(block) {
+    function enhanceBlock(block, commitBatch = null) {
       if (runtime.disposed || !runtime.settingsReady) return
       if (!(block instanceof HTMLElement) || !block.isConnected) return
       if (block.hasAttribute('data-dsh-render-skip')) return
@@ -1825,7 +1904,7 @@ window.__ModuleLoader__.load({
         }
         blockState.set(block, {
           timer: 0, token: 0, theme: '', hash: sourceHash, kind: 'none',
-          errorHash: '', errorKind: '', errorTheme: '',
+          errorHash: '', errorKind: '', errorTheme: '', batch: null,
         })
         return
       }
@@ -1833,7 +1912,7 @@ window.__ModuleLoader__.load({
       block.setAttribute('data-dsh-render-enhanced', '')
       const state = previous ?? {
         timer: 0, token: 0, theme: '', hash: '', kind: '',
-        errorHash: '', errorKind: '', errorTheme: '',
+        errorHash: '', errorKind: '', errorTheme: '', batch: null,
       }
       blockState.set(block, state)
       const theme = kind === 'mermaid' || kind === 'echarts' ? resolveTheme() : 'light'
@@ -1876,15 +1955,52 @@ window.__ModuleLoader__.load({
       // A cached diagram needs no streaming-stability wait; rendering it now
       // is what keeps reopening a session from flashing "rendering".
       const delay = cachedRenderFor(source, kind, theme) ? 0 : Math.max(200, Math.min(3000, runtime.settings.mermaid.debounceMs))
-      if (state.timer !== 0) clearTimeout(state.timer)
+      // A re-render supersedes a job still waiting in an older batch: clear the
+      // timer and release its batch slot now, otherwise that batch would wait
+      // forever for a render that never runs.
+      if (state.timer !== 0) {
+        clearTimeout(state.timer)
+        state.timer = 0
+        if (state.batch !== null) settleCommitBatch(state.batch)
+        state.batch = null
+      }
+      // Reserve the batch slot synchronously, before the timer fires: a fast
+      // cache hit must not flush the batch before its sibling diagrams joined.
+      // A batch that already hit its timeout commits on its own, so drop the
+      // closed reference instead of counting into it.
+      if (commitBatch !== null && commitBatch.closed) commitBatch = null
+      state.batch = commitBatch
+      if (commitBatch !== null) commitBatch.pending += 1
       state.timer = setTimeout(() => {
         state.timer = 0
-        void runRender(block, surface, body, source, kind, theme, token)
+        void runRender(block, surface, body, source, kind, theme, token, commitBatch)
       }, delay)
     }
 
     /**
-     * Execute one render and apply the result if the token is still current.
+     * Re-pin the chat scrollport to the floor in the same task that swaps a
+     * diagram into the transcript.
+     *
+     * The host's follow-tail correction runs from a ResizeObserver callback,
+     * one frame after the transcript changed height; when the reader is already
+     * at the bottom that one-frame gap reads as a small vertical jitter. Reading
+     * the pinned state before the swap and restoring the floor right after it
+     * keeps the height change and the scroll correction in the same frame.
+     * Readers who are not at the bottom are left alone.
+     * @param {HTMLElement} block - block whose swap changes transcript height.
+     * @returns {() => void} callback to run immediately after the DOM swap.
+     */
+    function pinToFloorAfterSwap(block) {
+      const scroller = block.closest('[data-conversation-scroll]')
+      if (!(scroller instanceof HTMLElement)) return () => {}
+      const pinned = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 24
+      return () => {
+        if (pinned) scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      }
+    }
+
+    /**
+     * Execute one render and commit the result, alone or with its batch.
      * @param {HTMLElement} block - code block.
      * @param {HTMLElement} surface - surface element.
      * @param {HTMLElement} body - body element.
@@ -1892,57 +2008,97 @@ window.__ModuleLoader__.load({
      * @param {'mermaid' | 'echarts' | 'csv'} kind - kind.
      * @param {'light' | 'dark'} theme - theme.
      * @param {number} token - render token.
+     * @param {{ pending: number, commits: Function[], timer: number, closed: boolean } | null} commitBatch - batch the result belongs to.
      */
-    async function runRender(block, surface, body, source, kind, theme, token) {
+    async function runRender(block, surface, body, source, kind, theme, token, commitBatch) {
       const state = blockState.get(block)
-      if (state === undefined || state.token !== token || runtime.disposed || !block.isConnected) return
+      const abandon = () => {
+        if (state !== undefined && state.batch === commitBatch) state.batch = null
+        if (commitBatch !== null) settleCommitBatch(commitBatch)
+      }
+      if (state === undefined || state.token !== token || runtime.disposed || !block.isConnected) {
+        abandon()
+        return
+      }
       const sourceHash = hashString(source)
+      /**
+       * Hand one DOM replacement to the batch, or run it now for an unbatched
+       * render. The replacement itself re-checks the token and connectivity,
+       * because a batch may commit a frame or two after the render settled.
+       * @param {() => void} commit - DOM replacement.
+       */
+      const commitResult = commit => {
+        if (state.batch === commitBatch) state.batch = null
+        const apply = () => {
+          if (state.token !== token || !block.isConnected || runtime.disposed) return
+          // Measure the pinned state before the swap and restore the floor right
+          // after it, so the height change and the scroll correction share one
+          // frame instead of flashing a one-frame offset.
+          const repin = pinToFloorAfterSwap(block)
+          commit()
+          repin()
+        }
+        if (commitBatch === null || commitBatch.closed) {
+          apply()
+          return
+        }
+        commitBatch.commits.push(apply)
+        settleCommitBatch(commitBatch)
+      }
       try {
         if (kind === 'mermaid') {
           const svg = await renderMermaidSvg(source, theme)
-          if (state.token !== token || !block.isConnected) return
-          body.innerHTML = svg
-          setSourceHidden(block, true)
-          surface.style.display = ''
-          body.style.display = ''
-          markSurfaceReady(surface, state)
-          setStatus(surface, '')
-          setSourceButton(surface, true)
+          commitResult(() => {
+            if (state.token !== token || !block.isConnected || runtime.disposed) return
+            body.innerHTML = svg
+            setSourceHidden(block, true)
+            surface.style.display = ''
+            body.style.display = ''
+            markSurfaceReady(surface, state)
+            setStatus(surface, '')
+            setSourceButton(surface, true)
+          })
         } else if (kind === 'echarts') {
           const option = parseEchartsOption(source)
           if (option === null) throw new Error('invalid ECharts option')
           const height = ECHARTS_HEIGHT
           const svg = await renderEchartsSvg(option, theme, height)
-          if (state.token !== token || !block.isConnected) return
-          body.innerHTML = svg
-          setSourceHidden(block, true)
-          surface.style.display = ''
-          body.style.display = ''
-          markSurfaceReady(surface, state)
-          setStatus(surface, '')
-          setSourceButton(surface, true)
+          commitResult(() => {
+            if (state.token !== token || !block.isConnected || runtime.disposed) return
+            body.innerHTML = svg
+            setSourceHidden(block, true)
+            surface.style.display = ''
+            body.style.display = ''
+            markSurfaceReady(surface, state)
+            setStatus(surface, '')
+            setSourceButton(surface, true)
+          })
         } else {
           const table = parseCsv(source)
           if (table === null) throw new Error('invalid CSV')
-          if (state.token !== token || !block.isConnected) return
-          body.innerHTML = renderCsvTable(table)
-          setSourceHidden(block, true)
-          surface.style.display = ''
-          body.style.display = ''
-          markSurfaceReady(surface, state)
-          setStatus(surface, table.truncated === true ? translate('tableTruncated') : '')
-          setSourceButton(surface, true)
+          commitResult(() => {
+            if (state.token !== token || !block.isConnected || runtime.disposed) return
+            body.innerHTML = renderCsvTable(table)
+            setSourceHidden(block, true)
+            surface.style.display = ''
+            body.style.display = ''
+            markSurfaceReady(surface, state)
+            setStatus(surface, table.truncated === true ? translate('tableTruncated') : '')
+            setSourceButton(surface, true)
+          })
         }
       } catch (cause) {
-        if (state.token !== token || runtime.disposed) return
-        setStatus(surface, translate('renderFailed') + ': ' + messageOf(cause).slice(0, 240))
-        body.innerHTML = '<div class="dshrender-empty">' + escapeHtml(translate('renderFailed')) + '</div>'
-        body.style.display = ''
-        surface.style.display = ''
-        markSurfaceError(surface, state, sourceHash, kind, theme)
-        setSourceButton(surface, true)
-        // Keep the source visible on failure.
-        setSourceHidden(block, false)
+        commitResult(() => {
+          if (state.token !== token || runtime.disposed || !block.isConnected) return
+          setStatus(surface, translate('renderFailed') + ': ' + messageOf(cause).slice(0, 240))
+          body.innerHTML = '<div class="dshrender-empty">' + escapeHtml(translate('renderFailed')) + '</div>'
+          body.style.display = ''
+          surface.style.display = ''
+          markSurfaceError(surface, state, sourceHash, kind, theme)
+          setSourceButton(surface, true)
+          // Keep the source visible on failure.
+          setSourceHidden(block, false)
+        })
       }
     }
 
@@ -2070,9 +2226,12 @@ window.__ModuleLoader__.load({
         if (runtime.disposed) return
         const blocks = [...pendingBlocks]
         pendingBlocks.clear()
+        // Commit every diagram found in this scan together, so opening a session
+        // changes the transcript height once instead of once per diagram.
+        const commitBatch = blocks.length > 0 ? createCommitBatch() : null
         for (const block of blocks) {
           try {
-            enhanceBlock(block)
+            enhanceBlock(block, commitBatch)
           } catch (cause) {
             try {
               console.warn('dsh-render: block enhancement failed', cause)
@@ -2080,6 +2239,17 @@ window.__ModuleLoader__.load({
               // Logging is best-effort.
             }
           }
+        }
+        if (commitBatch !== null && commitBatch.pending > 0) {
+          // A slow diagram must not hold the batch forever: flush what has
+          // settled so far, and let the late results commit on their own. The
+          // window tracks the configured debounce so a long streaming wait
+          // cannot cut the batch before its diagrams even started.
+          const debounce = Math.max(200, Math.min(3000, runtime.settings.mermaid.debounceMs))
+          commitBatch.timer = setTimeout(
+            () => flushCommitBatch(commitBatch),
+            Math.max(3500, debounce + 2500),
+          )
         }
         // Only newly mounted user messages are re-evaluated here; the full
         // document scan stays on the initial pass, settings changes, and the
