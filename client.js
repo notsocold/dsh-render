@@ -70,7 +70,7 @@ window.__ModuleLoader__.load({
           collapseUserMessages: true,
           userMessageMaxHeight: 360,
           lightBackground: '#FCFCFB',
-          inlineCodeColor: 'blue',
+          inlineCodeColor: 'red',
           customInlineCodeColor: '#8E2626',
         },
         typography: {
@@ -2811,8 +2811,20 @@ window.__ModuleLoader__.load({
       ]
       if (appearance.inlineCode === 'claude') {
         rules.push(
-          scopes + ' :not(pre) > code { background:rgba(0,0,0,.055) !important; border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.38)) !important; border-radius:4px !important; padding:0.1em 0.35em !important; font-weight:400 !important; }',
-          'body[data-ds-dark-theme] ' + scopes + ' :not(pre) > code { background:rgba(255,255,255,.09) !important; }',
+          // Chip geometry follows the user's reference screenshot and the
+          // rounder/tighter follow-ups: em-based so the radius and padding
+          // track whatever code font size the user picks. The host renders
+          // inline code as `display:inline-flex`, so the chip height is the
+          // inner line box + padding + border: the code-line-height setting
+          // would otherwise inflate it, hence the local 1.15 line-height.
+          // At 14px this is ~7.7px radius, ~16px inner line, ~1.4px top /
+          // ~0.3px bottom and ~4.5px horizontal padding. The top padding is
+          // deliberately a touch larger than the bottom: Latin glyphs without
+          // descenders leave the font's descender space empty below the
+          // baseline, which reads as a bigger bottom margin; this offsets it
+          // so the two optical gaps match.
+          scopes + ' :not(pre) > code { background:rgba(0,0,0,.05) !important; border:1px solid rgba(0,0,0,.14) !important; border-radius:0.55em !important; padding:0.1em 0.32em 0.02em !important; line-height:1.15 !important; font-weight:400 !important; }',
+          'body[data-ds-dark-theme] ' + scopes + ' :not(pre) > code { background:rgba(255,255,255,.09) !important; border-color:rgba(255,255,255,.14) !important; }',
           scopes + ' pre code { color:inherit !important; background:transparent !important; border:0 !important; padding:0 !important; border-radius:0 !important; font-weight:inherit !important; }',
         )
         const inlineColors = inlineCodeTextColors(appearance)

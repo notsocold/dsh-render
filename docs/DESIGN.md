@@ -103,7 +103,7 @@ Web (client.js)
 
 ### 追加能力（0.2.8）
 
-- 行内 code 文字颜色：`appearance.inlineCodeColor`（`inherit | blue | red | custom`，默认 `blue`）与 `appearance.customInlineCodeColor`（默认图片取样色 `#8E2626`）；仅在 `inlineCode=claude` 风格下生成颜色规则，暗色模式对图片色/自定义色自动与白色混合提亮。设置页外观组新增「行内代码文字颜色」下拉与自定义取色器。
+- 行内 code 文字颜色：`appearance.inlineCodeColor`（`inherit | blue | red | custom`，默认 `red` 图片取样暗红）与 `appearance.customInlineCodeColor`（默认 `#8E2626`）；仅在 `inlineCode=claude` 风格下生成颜色规则，暗色模式对图片色/自定义色自动与白色混合提亮。chip 几何按截图对齐并做了更圆/更紧凑的二次调整：`rgba(0,0,0,.05)` 底、`rgba(0,0,0,.14)` 1px 边、`0.55em` 圆角、`0.1em 0.32em 0.02em` 非对称内边距（上略大于下以抵消无降部字形的字体降部空白）与行内 code 专属 `line-height:1.15`（均以代码字号为基准缩放；宿主 inline-flex 行内盒会吃掉上下空间，故单独压行高）；暗色对应 `rgba(255,255,255,.09)` 底与 `rgba(255,255,255,.14)` 边。设置页外观组新增「行内代码文字颜色」下拉与自定义取色器。
 
 ### 明确不做
 

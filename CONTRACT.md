@@ -47,7 +47,7 @@
     "collapseUserMessages": true,
     "userMessageMaxHeight": 360,
     "lightBackground": "#FCFCFB",
-    "inlineCodeColor": "blue",
+    "inlineCodeColor": "red",
     "customInlineCodeColor": "#8E2626"
   },
   "typography": {
@@ -76,7 +76,7 @@
 - `appearance.collapseUserMessages`：boolean，默认 `true`（长用户消息默认折叠）；
 - `appearance.userMessageMaxHeight`：`[160, 800]`，默认 `360`；
 - `appearance.lightBackground`：`''` 或 `#RGB` / `#RRGGBB`（大小写归一为 `#RRGGBB`，可省略 `#`），默认 `#FCFCFB`；空串表示关闭覆盖、回到 DSH 原生浅色调色板；非法值归一为 `''`（关闭覆盖）；非字符串值保留原值；
-- `appearance.inlineCodeColor` ∈ `inherit | blue | red | custom`，默认 `blue`（与原 Claude 蓝字一致）；`inherit` 不输出 color 规则（跟随正文）；`red` 使用图片取样色 `#8E2626`；`custom` 使用 `customInlineCodeColor` 且为空/非法时回退 `blue`；仅 `appearance.inlineCode=claude` 时生效；
+- `appearance.inlineCodeColor` ∈ `inherit | blue | red | custom`，默认 `red`（用户截图取样暗红 `#8E2626`）；`inherit` 不输出 color 规则（跟随正文）；`blue` 是原 Claude 蓝字；`custom` 使用 `customInlineCodeColor` 且为空/非法时回退 `blue`；仅 `appearance.inlineCode=claude` 时生效；
 - `appearance.customInlineCodeColor`：`#RGB` / `#RRGGBB` 归一化后保存，默认 `#8E2626`；暗色模式下自动与白色混合提亮（`color-mix(… 58%, #fff 42%)`）以保持可读；
 - `typography.textFontFamily`：字体栈字符串，去控制字符与 `; { } < > \\` 后 ≤200 字符，空串跟随原生；
 - `typography.textFontSize`：`0`（跟随原生）或 `[10, 22]`；
@@ -254,8 +254,8 @@
 - 代码字体/字号/行高/连字：作用于 `.md-code-block pre`、`.md-code-block code`、`:not(pre) > code`；`codeFontSize=0` / `codeLineHeight=0` 时沿用 DSH 外观设置（`--dsh-code-font-size`、`--dsw-font-markdown-code-block`）；
 - 代码块边框与 banner 分隔线同样限定在 `:is([data-chat-flow], [data-document-markdown])` 作用域内，不触碰工具详情、计划预览等其它 Markdown 区域；
 - 链接与文件引用：Markdown 区域内普通链接（`a[href]`）以及文件提及/文件链接（`button`/`a` 的 `fileMention`/`fileLink` 类，按类名子串匹配）常驻 1.5px 虚线下划线（`--dsw-alias-link` 76% 混合色、offset 3px）；`hover` / `focus-visible` 时加粗到 2px、改用完整 link 色、offset 4px；不改变链接文字颜色，也不影响设置页与插件 UI。
-- 行内 code：`inlineCode=claude` 时保留灰色底（亮 `rgba(0,0,0,.055)` / 暗 `rgba(255,255,255,.09)`）、**1px 灰色描边**（`--dsw-alias-border-l2`，比背景更深）、`font-weight:400`（不加粗）、4px 圆角；代码块内 `pre code` 重置为透明/无边框/常规字重；
-- 行内 code 文字颜色由 `inlineCodeColor` 决定（在 claude 风格下生成独立 color 规则）：`blue`（默认）亮 `color-mix(--dsw-alias-link 84%, #000 16%)` / 暗 `--dsw-alias-link`；`red` 亮 `#8E2626`（用户截图取样）/ 暗 `color-mix(#8E2626 58%, #fff 42%)`；`custom` 使用归一化后的自定义色，暗色同样自动提亮；`inherit` 不生成 color 规则、跟随正文；
+- 行内 code：`inlineCode=claude` 时按用户截图几何绘制 chip —— 亮色底 `rgba(0,0,0,.05)`（在 `#FCFCFB` 上≈`#EFEFEE`）/ 暗 `rgba(255,255,255,.09)`、**1px 边框**（亮 `rgba(0,0,0,.14)`≈`#D9D9D8` / 暗 `rgba(255,255,255,.14)`）、**`0.55em` 圆角**（14px 代码字号下约 7.7px，明显更圆）、**`0.1em 0.32em 0.02em` 非对称内边距 + 行内 code 局部 `line-height:1.15`**（14px 下上约 1.4px、下约 0.3px、左右约 4.5px；上边距略大于下边距，用于抵消无降部字形留下的字体降部空白，使上下视觉间距相同；宿主把行内 code 渲染成 `inline-flex`，chip 高度=内部行盒+padding+边框，所以必须单独压行高，代码块仍遵循用户的「代码行高」设置）、`font-weight:400`（不加粗）；代码块内 `pre code` 重置为透明/无边框/常规字重；
+- 行内 code 文字颜色由 `inlineCodeColor` 决定（在 claude 风格下生成独立 color 规则）：`red`（默认）亮 `#8E2626`（用户截图取样）/ 暗 `color-mix(#8E2626 58%, #fff 42%)`；`blue` 亮 `color-mix(--dsw-alias-link 84%, #000 16%)` / 暗 `--dsw-alias-link`；`custom` 使用归一化后的自定义色，暗色同样自动提亮；`inherit` 不生成 color 规则、跟随正文；
 - 代码块：`codeBlock=claude|minimal` 时 `.md-code-block` 加 **1px `--dsw-alias-border-l2`** 边框 + 10px 圆角；`claude` 额外给 `[data-code-block-banner]` 底部分隔线（同色）；
 - 表格：`table=claude` 时给 `[data-chat-flow] table` / `[data-document-markdown] table` 应用 **Claude 风格**：1px 外框（`--dsw-alias-border-l2`，比 `l1` 稍深）、10px 圆角、表头半透明灰底（亮 `rgba(0,0,0,.05)` / 暗 `rgba(255,255,255,.07)`，另以 `color-mix(label-primary 6%)` 兜底）、表头 `label-primary` + 600 字重（避免次级文字色在浅灰底上显得发虚）、表头底部 1px `--dsw-alias-border-l2`、行间 1px `--dsw-alias-border-l2`、`8px 12px` 内边距、顶部对齐、行高 1.5、无竖线、**无行悬停**；**字号使用 `var(--dsh-content-font-size, 14px)`，随设置 → 外观的通用字号变化**（表格内 code 为 `0.9em` 随表格缩放）；**所有表格强制适应会话列宽**：直接包含表格的外层 `div:has(> table)` 先强制 `width:100%`（否则它作为 flex item 会收缩到内容宽，令表格的 100% 失去参照），表格再用 `width:100%` + `max-width:100%` + `table-layout:fixed` + `box-sizing:border-box`，列宽等分，单元格 `white-space:normal` + `overflow-wrap:anywhere` 允许严重换行，长 URL/行内 code 也可断行；宽表外层 `.md-table-wide` 用 `overflow-x:hidden`（覆盖宿主悬停时的 `overflow-x:scroll`），表格强制适应用会话宽度、不出现横向滚动；CSV 表格（`.dshrender-table`）落在同一作用域内，随之统一；
 - 所有样式均限定在 Markdown 区域，插件禁用时随 `dsh-render-appearance` 一起移除。

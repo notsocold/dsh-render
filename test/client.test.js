@@ -171,7 +171,7 @@ test('appearanceCss scopes the Claude styles to Markdown regions', () => {
   assert.match(css, /\[data-chat-flow\], \[data-document-markdown\]/)
   assert.match(css, /\.md-code-block \{ border:1px solid/)
   assert.match(css, /:is\(\[data-chat-flow\], \[data-document-markdown\]\) table/)
-  assert.match(css, /background:rgba\(0,0,0,\.055\)/)
+  assert.match(css, /background:rgba\(0,0,0,\.05\)/)
   assert.match(css, /font-weight:600/)
   assert.match(css, /font-weight:400/)
   assert.match(css, /text-decoration-line: underline !important; text-decoration-style: dotted !important/)
@@ -199,7 +199,7 @@ test('appearanceCss scopes the Claude styles to Markdown regions', () => {
   }, defaults))
   assert.doesNotMatch(plain, /:not\(pre\) > code \{ color:color-mix/)
   assert.match(plain, /text-decoration-style: dotted !important/)
-  assert.doesNotMatch(plain, /background:rgba\(0,0,0,\.055\)/)
+  assert.doesNotMatch(plain, /background:rgba\(0,0,0,\.05\)/)
   assert.doesNotMatch(plain, /\.md-code-block \{ border/)
 })
 
@@ -488,7 +488,7 @@ test('apply keeps the local color when the running Host predates the setting', a
 
 test('mergeSettings normalizes the inline-code text color', () => {
   const defaults = helpers.defaultSettings()
-  assert.equal(defaults.appearance.inlineCodeColor, 'blue')
+  assert.equal(defaults.appearance.inlineCodeColor, 'red', 'the image dark red is the default')
   assert.equal(defaults.appearance.customInlineCodeColor, '#8E2626')
   const merged = helpers.mergeSettings({
     appearance: { inlineCodeColor: 'red', customInlineCodeColor: '#abc' },
@@ -498,14 +498,15 @@ test('mergeSettings normalizes the inline-code text color', () => {
   const invalid = helpers.mergeSettings({
     appearance: { inlineCodeColor: 'purple', customInlineCodeColor: 'nope' },
   }, defaults)
-  assert.equal(invalid.appearance.inlineCodeColor, 'blue', 'unknown choices keep the base value')
+  assert.equal(invalid.appearance.inlineCodeColor, 'red', 'unknown choices keep the base value')
   assert.equal(invalid.appearance.customInlineCodeColor, '', 'invalid custom colors normalize to empty')
 })
 
 test('inlineCodeTextColors resolves the four inline-code color choices', () => {
   const defaults = helpers.defaultSettings()
+  assert.equal(helpers.inlineCodeTextColors(defaults.appearance).light, '#8E2626', 'image red is the default')
   assert.equal(
-    helpers.inlineCodeTextColors(defaults.appearance).light,
+    helpers.inlineCodeTextColors({ ...defaults.appearance, inlineCodeColor: 'blue' }).light,
     'color-mix(in srgb, var(--dsw-alias-link) 84%, #000 16%)',
   )
   assert.equal(helpers.inlineCodeTextColors({ ...defaults.appearance, inlineCodeColor: 'inherit' }), null)
@@ -529,9 +530,14 @@ test('inlineCodeTextColors resolves the four inline-code color choices', () => {
 
 test('appearanceCss applies the selected inline-code text color', () => {
   const defaults = helpers.defaultSettings()
-  const blue = helpers.appearanceCss(defaults)
+  assert.match(
+    helpers.appearanceCss(defaults),
+    /:not\(pre\) > code \{ color:#8E2626 !important; \}/,
+    'the image dark red is the default text color',
+  )
+  const blue = helpers.appearanceCss(helpers.mergeSettings({ appearance: { inlineCodeColor: 'blue' } }, defaults))
   assert.match(blue, /:not\(pre\) > code \{ color:color-mix\(in srgb, var\(--dsw-alias-link\) 84%, #000 16%\) !important; \}/)
-  assert.match(blue, /background:rgba\(0,0,0,\.055\)/)
+  assert.match(blue, /background:rgba\(0,0,0,\.05\)/)
 
   const red = helpers.appearanceCss(helpers.mergeSettings({ appearance: { inlineCodeColor: 'red' } }, defaults))
   assert.match(red, /:not\(pre\) > code \{ color:#8E2626 !important; \}/)
@@ -539,7 +545,7 @@ test('appearanceCss applies the selected inline-code text color', () => {
 
   const inherit = helpers.appearanceCss(helpers.mergeSettings({ appearance: { inlineCodeColor: 'inherit' } }, defaults))
   assert.doesNotMatch(inherit, /:not\(pre\) > code \{ color:/)
-  assert.match(inherit, /background:rgba\(0,0,0,\.055\)/, 'the chip itself stays Claude grey')
+  assert.match(inherit, /background:rgba\(0,0,0,\.05\)/, 'the chip itself stays Claude grey')
 
   const custom = helpers.appearanceCss(helpers.mergeSettings({
     appearance: { inlineCodeColor: 'custom', customInlineCodeColor: '#336699' },
