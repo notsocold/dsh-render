@@ -79,6 +79,25 @@ test('defaultSettings exposes the documented complete shape', () => {
     csv: { enabled: true },
     detection: { heuristic: true, extraKeywords: [] },
     prompt: { enabled: false },
+    appearance: {
+      table: 'claude',
+      inlineCode: 'claude',
+      codeBlock: 'claude',
+      codeFont: 'inherit',
+      customCodeFont: '',
+      codeFontSize: 0,
+      codeLineHeight: 0,
+      codeLigatures: false,
+      collapseUserMessages: true,
+      userMessageMaxHeight: 360,
+    },
+    typography: {
+      textFontFamily: '',
+      textFontSize: 0,
+      codeFontSize: 0,
+      terminalFontSize: 0,
+    },
+    uiScale: 1,
   })
 
   const first = defaultSettings()
@@ -102,6 +121,25 @@ test('normalizeSettings deep-merges known fields and drops unknown ones', () => 
     csv: { enabled: true },
     detection: { heuristic: true, extraKeywords: ['Sankey'] },
     prompt: { enabled: true },
+    appearance: {
+      table: 'claude',
+      inlineCode: 'claude',
+      codeBlock: 'claude',
+      codeFont: 'inherit',
+      customCodeFont: '',
+      codeFontSize: 0,
+      codeLineHeight: 0,
+      codeLigatures: false,
+      collapseUserMessages: true,
+      userMessageMaxHeight: 360,
+    },
+    typography: {
+      textFontFamily: '',
+      textFontSize: 0,
+      codeFontSize: 0,
+      terminalFontSize: 0,
+    },
+    uiScale: 1,
   })
 })
 
@@ -150,6 +188,67 @@ test('normalizeSettings clamps bounded values and validates types', () => {
   assert.equal(normalizeSettings({ mermaid: { maxSourceChars: '100' } }).mermaid.maxSourceChars, 200000)
 
   assert.equal(normalizeSettings({ version: 99 }).version, 1)
+})
+
+test('normalizeSettings validates the Markdown appearance group', () => {
+  const settings = normalizeSettings({
+    appearance: {
+      table: 'dsh',
+      inlineCode: 'unknown',
+      codeBlock: 'minimal',
+      codeFont: 'fira',
+      customCodeFont: ' "X"; {} ',
+      codeFontSize: 99,
+      codeLineHeight: 0.2,
+      codeLigatures: true,
+      unknown: 'drop',
+    },
+  })
+  assert.equal(settings.appearance.table, 'dsh')
+  assert.equal(settings.appearance.inlineCode, 'claude', 'an invalid choice keeps the default')
+  assert.equal(settings.appearance.codeBlock, 'minimal')
+  assert.equal(settings.appearance.codeFont, 'fira')
+  assert.equal(settings.appearance.customCodeFont, '"X"', 'CSS-breaking punctuation is stripped')
+  assert.equal(settings.appearance.codeFontSize, 20)
+  assert.equal(settings.appearance.codeLineHeight, 1.4)
+  assert.equal(settings.appearance.codeLigatures, true)
+  assert.equal('unknown' in settings.appearance, false)
+
+  const legacy = normalizeSettings({ appearance: { inlineCode: 'brand' } })
+  assert.equal(legacy.appearance.inlineCode, 'claude', 'the legacy brand value maps to the Claude chip')
+
+  const zero = normalizeSettings({ appearance: { codeFontSize: 0, codeLineHeight: 0 } })
+  assert.equal(zero.appearance.codeFontSize, 0, '0 keeps the DSH appearance baseline')
+  assert.equal(zero.appearance.codeLineHeight, 0)
+})
+
+test('normalizeSettings validates the General typography group', () => {
+  const settings = normalizeSettings({
+    typography: {
+      textFontFamily: ' "X"; {} ',
+      textFontSize: 99,
+      codeFontSize: 5,
+      terminalFontSize: 999,
+      unknown: 'drop',
+    },
+  })
+  assert.equal(settings.typography.textFontFamily, '"X"', 'CSS-breaking punctuation is stripped')
+  assert.equal(settings.typography.textFontSize, 22)
+  assert.equal(settings.typography.codeFontSize, 10)
+  assert.equal(settings.typography.terminalFontSize, 20)
+  assert.equal('unknown' in settings.typography, false)
+
+  const zero = normalizeSettings({ typography: { textFontSize: 0, codeFontSize: 0, terminalFontSize: 0 } })
+  assert.equal(zero.typography.textFontSize, 0, '0 keeps the native value')
+  assert.equal(zero.typography.codeFontSize, 0)
+  assert.equal(zero.typography.terminalFontSize, 0)
+})
+
+test('normalizeSettings clamps the whole-interface scale', () => {
+  assert.equal(normalizeSettings({ uiScale: 2 }).uiScale, 1.3)
+  assert.equal(normalizeSettings({ uiScale: 0.5 }).uiScale, 0.8)
+  assert.equal(normalizeSettings({ uiScale: 1.15 }).uiScale, 1.15)
+  assert.equal(normalizeSettings({ uiScale: 'large' }).uiScale, 1)
 })
 
 test('normalizeSettings trims, dedupes, drops over-long, and caps extraKeywords', () => {

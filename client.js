@@ -51,7 +51,40 @@ window.__ModuleLoader__.load({
         csv: { enabled: true },
         detection: { heuristic: true, extraKeywords: [] },
         prompt: { enabled: false },
+        appearance: {
+          table: 'claude',
+          inlineCode: 'claude',
+          codeBlock: 'claude',
+          codeFont: 'inherit',
+          customCodeFont: '',
+          codeFontSize: 0,
+          codeLineHeight: 0,
+          codeLigatures: false,
+          collapseUserMessages: true,
+          userMessageMaxHeight: 360,
+        },
+        typography: {
+          textFontFamily: '',
+          textFontSize: 0,
+          codeFontSize: 0,
+          terminalFontSize: 0,
+        },
+        uiScale: 1,
       }
+    }
+
+    /**
+     * Clean one custom font stack exactly like the Host normalizer does.
+     * @param {unknown} value - raw font stack.
+     * @returns {string}
+     */
+    function cleanCustomFont(value) {
+      if (typeof value !== 'string') return ''
+      return value
+        .replace(/[\u0000-\u001f\u007f]/g, '')
+        .replace(/[;{}<>\\]/g, '')
+        .trim()
+        .slice(0, 200)
     }
 
     /**
@@ -69,6 +102,12 @@ window.__ModuleLoader__.load({
         csv: { ...base.csv },
         detection: { ...base.detection, extraKeywords: [...(base.detection?.extraKeywords ?? [])] },
         prompt: { ...base.prompt },
+        appearance: {
+          ...base.appearance,
+          customCodeFont: base.appearance?.customCodeFont ?? '',
+        },
+        typography: { ...base.typography },
+        uiScale: base.uiScale ?? 1,
       }
       if (!isRecord(patch)) return next
       if (isRecord(patch.mermaid)) {
@@ -100,6 +139,48 @@ window.__ModuleLoader__.load({
         }
       }
       if (isRecord(patch.prompt) && typeof patch.prompt.enabled === 'boolean') next.prompt.enabled = patch.prompt.enabled
+      if (isRecord(patch.appearance)) {
+        const appearance = patch.appearance
+        if (appearance.table === 'claude' || appearance.table === 'dsh') next.appearance.table = appearance.table
+        if (appearance.inlineCode === 'brand' || appearance.inlineCode === 'claude') next.appearance.inlineCode = 'claude'
+        else if (appearance.inlineCode === 'dsh') next.appearance.inlineCode = 'dsh'
+        if (appearance.codeBlock === 'claude' || appearance.codeBlock === 'minimal' || appearance.codeBlock === 'dsh') {
+          next.appearance.codeBlock = appearance.codeBlock
+        }
+        if (typeof appearance.codeFont === 'string' && ['inherit', 'system', 'jetbrains', 'fira', 'cascadia', 'sfmono', 'consolas', 'menlo', 'custom'].includes(appearance.codeFont)) {
+          next.appearance.codeFont = appearance.codeFont
+        }
+        if (typeof appearance.customCodeFont === 'string') {
+          next.appearance.customCodeFont = cleanCustomFont(appearance.customCodeFont)
+        }
+        if (typeof appearance.codeFontSize === 'number' && Number.isFinite(appearance.codeFontSize)) {
+          const size = Math.round(appearance.codeFontSize)
+          next.appearance.codeFontSize = size === 0 ? 0 : Math.min(20, Math.max(12, size))
+        }
+        if (typeof appearance.codeLineHeight === 'number' && Number.isFinite(appearance.codeLineHeight)) {
+          const rounded = Math.round(appearance.codeLineHeight * 100) / 100
+          next.appearance.codeLineHeight = rounded === 0 ? 0 : Math.min(1.9, Math.max(1.4, rounded))
+        }
+        if (typeof appearance.codeLigatures === 'boolean') next.appearance.codeLigatures = appearance.codeLigatures
+        if (typeof appearance.collapseUserMessages === 'boolean') next.appearance.collapseUserMessages = appearance.collapseUserMessages
+        if (typeof appearance.userMessageMaxHeight === 'number' && Number.isFinite(appearance.userMessageMaxHeight)) {
+          next.appearance.userMessageMaxHeight = Math.min(800, Math.max(160, Math.round(appearance.userMessageMaxHeight)))
+        }
+      }
+      if (isRecord(patch.typography)) {
+        if (typeof patch.typography.textFontFamily === 'string') {
+          next.typography.textFontFamily = cleanCustomFont(patch.typography.textFontFamily)
+        }
+        for (const [key, min, max] of [['textFontSize', 10, 22], ['codeFontSize', 10, 16], ['terminalFontSize', 10, 20]]) {
+          const value = patch.typography[key]
+          if (typeof value !== 'number' || !Number.isFinite(value)) continue
+          const size = Math.round(value)
+          next.typography[key] = size === 0 ? 0 : Math.min(max, Math.max(min, size))
+        }
+      }
+      if (typeof patch.uiScale === 'number' && Number.isFinite(patch.uiScale)) {
+        next.uiScale = clampUiScale(patch.uiScale)
+      }
       return next
     }
 
@@ -118,6 +199,8 @@ window.__ModuleLoader__.load({
       nav: '渲染',
       title: '渲染增强',
       intro: '把对话与文档预览中的围栏代码块渲染成 Mermaid 图、ECharts 图表或 CSV 表格。渲染在浏览器内完成，源码始终保留可切换查看。',
+      sectionAppearance: 'Markdown 外观',
+      appearanceHint: '这些样式只作用于聊天与文档预览中的 Markdown，不修改 DSH 源码。',
       sectionDiagrams: '图表',
       sectionTables: '表格',
       sectionDetection: '识别',
@@ -170,6 +253,8 @@ window.__ModuleLoader__.load({
       zoomIn: '放大',
       zoomOut: '缩小',
       zoomReset: '重置缩放',
+      zoomFit: '适应屏幕',
+      zoomHint: '滚轮缩放 · 拖拽平移 · 双击适应',
       sourceTooLarge: '源码过大，已保持代码块显示',
       moduleLoading: '图表组件加载中…',
       moduleFailed: '图表组件加载失败',
@@ -178,12 +263,66 @@ window.__ModuleLoader__.load({
       csvLabel: 'CSV',
       chartHeight: '图表高度',
       chartHeightHint: 'ECharts 容器的像素高度。',
+      tableStyle: '表格风格',
+      tableStyleClaude: 'Claude 风格',
+      tableStyleDsh: 'DSH 原生',
+      inlineStyle: '行内代码',
+      inlineStyleClaude: 'Claude 灰底蓝字描边',
+      inlineStyleDsh: 'DSH 原生',
+      codeBlockStyle: '代码块风格',
+      codeBlockClaude: 'Claude 卡片',
+      codeBlockMinimal: '极简边框',
+      codeBlockDsh: 'DSH 原生',
+      codeFont: '代码字体',
+      codeFontInherit: '跟随 DSH 外观',
+      codeFontSystem: '系统等宽',
+      codeFontJetbrains: 'JetBrains Mono',
+      codeFontFira: 'Fira Code',
+      codeFontCascadia: 'Cascadia Code',
+      codeFontSfmono: 'SF Mono',
+      codeFontConsolas: 'Consolas',
+      codeFontMenlo: 'Menlo',
+      codeFontCustom: '自定义字体栈',
+      customCodeFont: '自定义字体栈',
+      customCodeFontHint: '例如 "My Font", ui-monospace, monospace',
+      codeFontSize: '代码字号',
+      codeFontSizeHint: '0 = 跟随 DSH 外观；12–20 覆盖',
+      codeLineHeight: '代码行高',
+      codeLineHeightHint: '0 = 跟随 DSH 外观；1.4–1.9 覆盖',
+      codeLigatures: '启用代码连字',
+      codeLigaturesHint: '需要字体本身支持连字（如 Fira Code）',
+      collapseUserMessages: '长用户消息折叠',
+      collapseUserMessagesHint: '超过阈值的用户消息默认折叠，点击「展开更多」查看全文；重渲染后恢复折叠。',
+      userMessageMaxHeight: '折叠高度阈值',
+      userMessageMaxHeightHint: '160–800px，默认 360px。',
+      expandMore: '展开更多',
+      showLess: '收起',
+      typographyTitle: '字体与字号',
+      typographyHint: '覆盖界面字体与会话/代码/终端字号；留空或 0 表示跟随「通用 → 外观」。',
+      typographyFont: '界面字体',
+      typographyFontPlaceholder: '留空跟随原生，例如 "PingFang SC", sans-serif',
+      typographyTextSize: '会话字号（0 = 跟随）',
+      typographyCodeSize: '代码字号（0 = 跟随）',
+      typographyTerminalSize: '终端字号（0 = 跟随）',
+      typographySizeHint: '0 表示跟随原生外观设置',
+      typographyFollowNative: '跟随原生',
+      typographySave: '保存',
+      typographySaved: '已保存',
+      typographySaveFailed: '保存失败',
+      uiScaleTitle: '界面缩放',
+      uiScaleHint: '整体放大/缩小整个 Web 界面（字体与控件）。100% 为默认；实验性设置，可能影响滚动或弹层定位，出现异常请重置 100%。',
+      uiScaleSave: '应用',
+      uiScaleReset: '重置 100%',
+      uiScaleSaved: '已应用',
+      uiScaleSaveFailed: '应用失败',
     }
 
     const en = {
       nav: 'Rendering',
       title: 'Rich rendering',
       intro: 'Render fenced code blocks from chat and document previews as Mermaid diagrams, ECharts charts, or CSV tables. Rendering happens in the browser and the original source stays one click away.',
+      sectionAppearance: 'Markdown appearance',
+      appearanceHint: 'These styles only affect Markdown in chat and document previews; DSH source stays untouched.',
       sectionDiagrams: 'Diagrams',
       sectionTables: 'Tables',
       sectionDetection: 'Detection',
@@ -236,6 +375,8 @@ window.__ModuleLoader__.load({
       zoomIn: 'Zoom in',
       zoomOut: 'Zoom out',
       zoomReset: 'Reset zoom',
+      zoomFit: 'Fit to screen',
+      zoomHint: 'Scroll to zoom · Drag to pan · Double-click to fit',
       sourceTooLarge: 'Source is too large; the code block stays as-is',
       moduleLoading: 'Loading diagram engine…',
       moduleFailed: 'Diagram engine failed to load',
@@ -244,6 +385,58 @@ window.__ModuleLoader__.load({
       csvLabel: 'CSV',
       chartHeight: 'Chart height',
       chartHeightHint: 'Pixel height of the ECharts container.',
+      tableStyle: 'Table style',
+      tableStyleClaude: 'Claude style',
+      tableStyleDsh: 'DSH native',
+      inlineStyle: 'Inline code',
+      inlineStyleClaude: 'Claude grey + blue ink + outline',
+      inlineStyleDsh: 'DSH native',
+      codeBlockStyle: 'Code block style',
+      codeBlockClaude: 'Claude card',
+      codeBlockMinimal: 'Minimal border',
+      codeBlockDsh: 'DSH native',
+      codeFont: 'Code font',
+      codeFontInherit: 'Follow DSH appearance',
+      codeFontSystem: 'System monospace',
+      codeFontJetbrains: 'JetBrains Mono',
+      codeFontFira: 'Fira Code',
+      codeFontCascadia: 'Cascadia Code',
+      codeFontSfmono: 'SF Mono',
+      codeFontConsolas: 'Consolas',
+      codeFontMenlo: 'Menlo',
+      codeFontCustom: 'Custom font stack',
+      customCodeFont: 'Custom font stack',
+      customCodeFontHint: 'e.g. "My Font", ui-monospace, monospace',
+      codeFontSize: 'Code font size',
+      codeFontSizeHint: '0 = follow DSH appearance; 12–20 overrides',
+      codeLineHeight: 'Code line height',
+      codeLineHeightHint: '0 = follow DSH appearance; 1.4–1.9 overrides',
+      codeLigatures: 'Enable code ligatures',
+      codeLigaturesHint: 'Requires a font with ligatures (e.g. Fira Code)',
+      collapseUserMessages: 'Collapse long user messages',
+      collapseUserMessagesHint: 'User messages taller than the threshold start collapsed; use "Show more" to expand. Re-rendered messages collapse again.',
+      userMessageMaxHeight: 'Collapse height',
+      userMessageMaxHeightHint: '160–800 px, default 360 px.',
+      expandMore: 'Show more',
+      showLess: 'Show less',
+      typographyTitle: 'Font and size',
+      typographyHint: 'Override the interface font and the conversation/code/terminal sizes; empty or 0 keeps Settings → General → Appearance.',
+      typographyFont: 'Interface font',
+      typographyFontPlaceholder: 'Empty follows native, e.g. "PingFang SC", sans-serif',
+      typographyTextSize: 'Conversation size (0 = native)',
+      typographyCodeSize: 'Code size (0 = native)',
+      typographyTerminalSize: 'Terminal size (0 = native)',
+      typographySizeHint: '0 follows the native Appearance setting',
+      typographyFollowNative: 'Follow native',
+      typographySave: 'Save',
+      typographySaved: 'Saved',
+      typographySaveFailed: 'Save failed',
+      uiScaleTitle: 'Interface scale',
+      uiScaleHint: 'Zooms the whole Web interface (font and controls). 100% is default; experimental — scrolling or popover placement may be affected, reset to 100% if anything looks off.',
+      uiScaleSave: 'Apply',
+      uiScaleReset: 'Reset 100%',
+      uiScaleSaved: 'Applied',
+      uiScaleSaveFailed: 'Apply failed',
     }
 
     let dictionaries = { zh, en }
@@ -1155,39 +1348,338 @@ window.__ModuleLoader__.load({
      * Fullscreen overlay for one rendered surface.
      * @param {HTMLElement} surface - rendered surface.
      */
+    /** Minimum and maximum viewer scale (1 = intrinsic SVG size). */
+    const MIN_ZOOM = 0.02
+    const MAX_ZOOM = 20
+
+    /** @param {number} value - requested scale. @returns {number} */
+    function clampZoom(value) {
+      if (!Number.isFinite(value)) return 1
+      return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
+    }
+
+    /**
+     * Fit content inside a viewport with a small margin, centered.
+     * @param {number} contentWidth - intrinsic content width.
+     * @param {number} contentHeight - intrinsic content height.
+     * @param {number} viewportWidth - available width.
+     * @param {number} viewportHeight - available height.
+     * @param {number} [margin] - fraction of the viewport used (default 0.94).
+     * @returns {{ scale: number, x: number, y: number }}
+     */
+    function fitTransform(contentWidth, contentHeight, viewportWidth, viewportHeight, margin = 0.94) {
+      if (!(contentWidth > 0) || !(contentHeight > 0) || !(viewportWidth > 0) || !(viewportHeight > 0)) {
+        return { scale: 1, x: 0, y: 0 }
+      }
+      const scale = clampZoom(Math.min((viewportWidth * margin) / contentWidth, (viewportHeight * margin) / contentHeight))
+      return {
+        scale,
+        x: (viewportWidth - contentWidth * scale) / 2,
+        y: (viewportHeight - contentHeight * scale) / 2,
+      }
+    }
+
+    /**
+     * Zoom around one viewport anchor so the content point under it stays put.
+     * @param {{ scale: number, x: number, y: number }} transform - current transform.
+     * @param {number} nextScale - requested scale.
+     * @param {number} pointerX - anchor X in viewport coordinates.
+     * @param {number} pointerY - anchor Y in viewport coordinates.
+     * @returns {{ scale: number, x: number, y: number }}
+     */
+    function zoomAt(transform, nextScale, pointerX, pointerY) {
+      const scale = clampZoom(nextScale)
+      const ratio = scale / transform.scale
+      return {
+        scale,
+        x: pointerX - (pointerX - transform.x) * ratio,
+        y: pointerY - (pointerY - transform.y) * ratio,
+      }
+    }
+
+    /**
+     * Intrinsic size of a rendered SVG, preferring its viewBox so mermaid's
+     * percentage width does not collapse the viewer.
+     * @param {SVGElement} svg - rendered SVG element.
+     * @returns {{ width: number, height: number }}
+     */
+    function svgSize(svg) {
+      try {
+        const box = svg.viewBox?.baseVal
+        if (box !== undefined && box.width > 0 && box.height > 0) return { width: box.width, height: box.height }
+        const width = svg.width?.baseVal?.value
+        const height = svg.height?.baseVal?.value
+        if (typeof width === 'number' && width > 0 && typeof height === 'number' && height > 0) return { width, height }
+        const rect = svg.getBoundingClientRect()
+        if (rect.width > 0 && rect.height > 0) return { width: rect.width, height: rect.height }
+      } catch {
+        // Fall through to a sane default.
+      }
+      return { width: 960, height: 540 }
+    }
+
+    /**
+     * Build one viewer toolbar button.
+     * @param {string} act - data-act value.
+     * @param {string} text - visible label.
+     * @param {string} label - accessible/tooltip label.
+     * @returns {HTMLButtonElement}
+     */
+    function overlayButton(act, text, label) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'dshrender-overlay-btn'
+      button.setAttribute('data-act', act)
+      button.textContent = text
+      button.setAttribute('aria-label', label)
+      button.title = label
+      return button
+    }
+
+    /** Cleanup of the currently open viewer, so reopening never leaks listeners. */
+    let fullscreenCleanup = null
+
+    /**
+     * Fullscreen viewer for one rendered surface. The stage fills the viewport
+     * and the cloned body is laid out at its intrinsic size inside a pan/zoom
+     * canvas: initial fit-to-screen, wheel/button zoom around the pointer,
+     * drag-to-pan, double-click to fit, and keyboard shortcuts.
+     * @param {HTMLElement} surface - rendered surface.
+     */
     function openFullscreen(surface) {
-      const existing = document.querySelector('.dshrender-overlay')
-      if (existing !== null) existing.remove()
+      if (fullscreenCleanup !== null) {
+        try { fullscreenCleanup() } catch { /* teardown is best-effort */ }
+      }
+      document.querySelector('.dshrender-overlay')?.remove()
+      const source = surface.querySelector('[data-dsh-render-body]')
+      if (!(source instanceof HTMLElement)) return
+      const sourceSvg = source.querySelector('svg')
+      const kind = surface.getAttribute('data-dsh-render-kind') ?? 'mermaid'
+      // CSV keeps the scrollable static view; every diagram (even a render
+      // fallback without an <svg>) uses the zoomable fit/pan viewer.
+      const svgIntrinsic = sourceSvg !== null ? svgSize(sourceSvg) : kind === 'csv' ? null : { width: 960, height: 540 }
+      const sourceRect = (() => {
+        try {
+          const rect = sourceSvg?.getBoundingClientRect()
+          return rect && rect.width > 0 && rect.height > 0 ? rect : null
+        } catch {
+          return null
+        }
+      })()
+      const baseWidth = Math.max(1, Math.round(sourceRect?.width || (svgIntrinsic !== null ? svgIntrinsic.width : 960)))
+      const baseHeight = Math.max(1, Math.round(sourceRect?.height || (svgIntrinsic !== null ? svgIntrinsic.height : 540)))
+
       const overlay = document.createElement('div')
       overlay.className = 'dshrender-overlay'
       overlay.tabIndex = -1
+
       const stage = document.createElement('div')
       stage.className = 'dshrender-overlay-stage'
-      const close = document.createElement('button')
-      close.type = 'button'
-      close.className = 'dshrender-overlay-close'
-      close.textContent = translate('close')
-      const body = surface.querySelector('[data-dsh-render-body]')
-      if (body instanceof HTMLElement) stage.appendChild(body.cloneNode(true))
+
+      const bar = document.createElement('div')
+      bar.className = 'dshrender-overlay-bar'
+      const title = document.createElement('span')
+      title.className = 'dshrender-overlay-title'
+      title.textContent = translate(kind === 'mermaid' ? 'mermaidLabel' : kind === 'echarts' ? 'echartsLabel' : 'csvLabel') + ' · v9'
+      const hint = document.createElement('span')
+      hint.className = 'dshrender-overlay-hint'
+      hint.textContent = translate('zoomHint')
+      const actions = document.createElement('span')
+      actions.className = 'dshrender-overlay-actions'
+
+      const zoomOut = overlayButton('zoom-out', '−', translate('zoomOut'))
+      const zoomValue = document.createElement('span')
+      zoomValue.className = 'dshrender-overlay-zoom'
+      zoomValue.textContent = '100%'
+      const zoomIn = overlayButton('zoom-in', '+', translate('zoomIn'))
+      const fitButton = overlayButton('zoom-fit', translate('zoomFit'), translate('zoomFit'))
+      const resetButton = overlayButton('zoom-reset', translate('zoomReset'), translate('zoomReset'))
+      const closeButton = overlayButton('close', translate('close'), translate('close'))
+      actions.append(zoomOut, zoomValue, zoomIn, fitButton, resetButton, closeButton)
+      bar.append(title, hint, actions)
+
+      const viewport = document.createElement('div')
+      viewport.className = 'dshrender-overlay-viewport'
+      const canvas = document.createElement('div')
+      canvas.className = 'dshrender-overlay-canvas'
+      overlay.style.overflow = 'hidden'
+      stage.style.height = 'calc(100vh - 48px)'
+      stage.style.maxHeight = 'calc(100vh - 48px)'
+      canvas.appendChild(source.cloneNode(true))
+      viewport.appendChild(canvas)
+      stage.append(bar, viewport)
       overlay.appendChild(stage)
-      overlay.appendChild(close)
-      const dismiss = () => {
-        overlay.remove()
-        document.removeEventListener('keydown', onKey, true)
+      document.body.appendChild(overlay)
+      const previousBodyOverflow = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+
+      if (svgIntrinsic === null) {
+        // Tabular content: no meaningful zoom, keep the table scrollable.
+        viewport.dataset.static = 'true'
+        zoomOut.hidden = true
+        zoomValue.hidden = true
+        zoomIn.hidden = true
+        fitButton.hidden = true
+        resetButton.hidden = true
+        hint.hidden = true
+      } else {
+        // Never edit the cloned diagram (no viewBox/overflow/attribute
+        // changes). Render it at exactly the size it already has in the
+        // message, then scale the whole canvas as one picture.
+        const clone = canvas.querySelector('svg')
+        if (clone !== null) {
+          clone.style.width = baseWidth + 'px'
+          clone.style.height = baseHeight + 'px'
+          clone.style.maxWidth = 'none'
+          clone.style.maxHeight = 'none'
+          clone.style.display = 'block'
+          clone.style.flex = 'none'
+        }
+        canvas.style.width = '100%'
+        canvas.style.height = '100%'
+        canvas.style.display = 'flex'
+        canvas.style.alignItems = 'center'
+        canvas.style.justifyContent = 'center'
+        canvas.style.transformOrigin = 'center center'
+        viewport.style.overflow = 'hidden'
       }
+
+      const state = { scale: 1, x: 0, y: 0 }
+      const apply = () => {
+        if (svgIntrinsic !== null) {
+          // Scale the whole canvas. The SVG keeps its original layout size, so
+          // Mermaid's foreignObject HTML never reflows (which previously
+          // produced inner scrollbars and clipped nodes while zooming).
+          canvas.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`
+        }
+        zoomValue.textContent = Math.round(state.scale * 100) + '%'
+      }
+      const fitView = () => {
+        if (svgIntrinsic === null) return
+        const width = Math.max(1, canvas.clientWidth || viewport.clientWidth)
+        const height = Math.max(1, canvas.clientHeight || viewport.clientHeight)
+        const scale = Math.min(width / baseWidth, height / baseHeight)
+        state.scale = clampZoom(scale)
+        state.x = 0
+        state.y = 0
+        clampPan()
+        apply()
+      }
+      const fit = fitView
+      const reset = () => {
+        if (svgIntrinsic === null) return
+        const width = canvas.clientWidth || 1
+        const height = canvas.clientHeight || 1
+        state.scale = 1
+        state.x = (width - baseWidth) / 2
+        state.y = (height - baseHeight) / 2
+        clampPan()
+        apply()
+      }
+      const clampPan = () => {
+        const width = canvas.clientWidth || 1
+        const height = canvas.clientHeight || 1
+        const overflowX = Math.max(0, (baseWidth * state.scale - width) / 2)
+        const overflowY = Math.max(0, (baseHeight * state.scale - height) / 2)
+        state.x = Math.min(overflowX, Math.max(-overflowX, state.x))
+        state.y = Math.min(overflowY, Math.max(-overflowY, state.y))
+      }
+      const zoom = factor => {
+        if (svgIntrinsic === null) return
+        state.scale = clampZoom(state.scale * factor)
+        clampPan()
+        apply()
+      }
+
+      const onWheel = event => {
+        if (svgIntrinsic === null) return
+        event.preventDefault()
+        const rect = viewport.getBoundingClientRect()
+        zoom(Math.exp(-event.deltaY * 0.0015), event.clientX - rect.left, event.clientY - rect.top)
+      }
+
+      let drag = null
+      const onPointerDown = event => {
+        if (svgIntrinsic === null || event.button !== 0) return
+        drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, x: state.x, y: state.y }
+        viewport.dataset.dragging = 'true'
+        try { viewport.setPointerCapture(event.pointerId) } catch { /* capture is best-effort */ }
+      }
+      const onPointerMove = event => {
+        if (drag === null || event.pointerId !== drag.id) return
+        state.x = drag.x + (event.clientX - drag.startX)
+        state.y = drag.y + (event.clientY - drag.startY)
+        clampPan()
+        apply()
+      }
+      const onPointerUp = event => {
+        if (drag === null || event.pointerId !== drag.id) return
+        drag = null
+        delete viewport.dataset.dragging
+        try { viewport.releasePointerCapture(event.pointerId) } catch { /* best-effort */ }
+      }
+
       const onKey = event => {
         if (event.key === 'Escape') {
           event.preventDefault()
           dismiss()
+          return
+        }
+        if (svgIntrinsic === null) return
+        if (event.key === '+' || event.key === '=') {
+          event.preventDefault()
+          zoom(1.25)
+        } else if (event.key === '-') {
+          event.preventDefault()
+          zoom(1 / 1.25)
+        } else if (event.key === '0' || event.key.toLowerCase() === 'f') {
+          event.preventDefault()
+          fit()
+        } else if (event.key.toLowerCase() === 'r') {
+          event.preventDefault()
+          reset()
         }
       }
-      close.addEventListener('click', dismiss)
+      const onResize = () => fit()
+
+      const dismiss = () => {
+        document.body.style.overflow = previousBodyOverflow
+        resizeObserver?.disconnect()
+        overlay.remove()
+        document.removeEventListener('keydown', onKey, true)
+        window.removeEventListener('resize', onResize)
+        if (fullscreenCleanup === dismiss) fullscreenCleanup = null
+      }
+
+      const resizeObserver = typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => { if (svgIntrinsic !== null) fitView() })
+        : null
+      if (resizeObserver !== null) resizeObserver.observe(viewport)
+
+      zoomOut.addEventListener('click', () => zoom(1 / 1.25))
+      zoomIn.addEventListener('click', () => zoom(1.25))
+      fitButton.addEventListener('click', fit)
+      resetButton.addEventListener('click', reset)
+      closeButton.addEventListener('click', dismiss)
+      viewport.addEventListener('wheel', onWheel, { passive: false })
+      viewport.addEventListener('pointerdown', onPointerDown)
+      viewport.addEventListener('pointermove', onPointerMove)
+      viewport.addEventListener('pointerup', onPointerUp)
+      viewport.addEventListener('pointercancel', onPointerUp)
+      viewport.addEventListener('dblclick', fit)
       overlay.addEventListener('click', event => {
         if (event.target === overlay) dismiss()
       })
       document.addEventListener('keydown', onKey, true)
-      document.body.appendChild(overlay)
+      window.addEventListener('resize', onResize)
+      fullscreenCleanup = dismiss
       overlay.focus()
+      // The viewport has its final size only after the first layout pass;
+      // fitting in the second frame also covers late flex relayout.
+      requestAnimationFrame(() => {
+        fitView()
+        requestAnimationFrame(fitView)
+      })
     }
 
     /* ------------------------------ enhancement engine ------------------------------ */
@@ -1345,6 +1837,89 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /* ------------------------------ long user messages ------------------------------ */
+
+    /**
+     * Collapse one long user message when it exceeds the configured height.
+     * @param {HTMLElement} node - `[data-chat-flow-kind="user"]` node.
+     */
+    function enhanceUserMessage(node) {
+      if (runtime.disposed) return
+      const bubble = node.querySelector('[data-message-bubble]')
+      if (!(bubble instanceof HTMLElement)) return
+      const appearance = runtime.settings.appearance ?? {}
+      if (appearance.collapseUserMessages === false) {
+        resetUserMessage(node)
+        return
+      }
+      const state = bubble.dataset.dshrenderUserState
+      if (state === 'collapsed' || state === 'expanded') return
+      const maxHeight = clampUserMessageMaxHeight(appearance.userMessageMaxHeight)
+      if (!shouldCollapseUserMessage(bubble.scrollHeight, maxHeight)) {
+        bubble.dataset.dshrenderUserState = 'none'
+        return
+      }
+      bubble.classList.add('dshrender-user-collapsed')
+      bubble.dataset.dshrenderUserState = 'collapsed'
+      let button = node.querySelector('.dshrender-user-toggle')
+      if (button === null) {
+        button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'dshrender-user-toggle'
+        bubble.after(button)
+      }
+      button.textContent = translate('expandMore')
+      button.setAttribute('aria-expanded', 'false')
+    }
+
+    /** @param {HTMLElement} node - user message node. */
+    function resetUserMessage(node) {
+      const button = node.querySelector('.dshrender-user-toggle')
+      if (button !== null) button.remove()
+      const bubble = node.querySelector('[data-message-bubble]')
+      if (bubble instanceof HTMLElement) {
+        bubble.classList.remove('dshrender-user-collapsed')
+        delete bubble.dataset.dshrenderUserState
+      }
+    }
+
+    /** @param {ParentNode} [root] - scan root. */
+    function scanUserMessages(root = document) {
+      if (runtime.disposed) return
+      const nodes = root.querySelectorAll?.('[data-chat-flow-kind="user"]')
+      if (nodes === undefined) return
+      for (const node of nodes) {
+        if (node instanceof HTMLElement) {
+          try { enhanceUserMessage(node) } catch { /* best-effort */ }
+        }
+      }
+    }
+
+    /** @param {ParentNode} [root] - reset root. */
+    function resetUserMessages(root = document) {
+      const nodes = root.querySelectorAll?.('[data-chat-flow-kind="user"]')
+      if (nodes === undefined) return
+      for (const node of nodes) {
+        if (node instanceof HTMLElement) resetUserMessage(node)
+      }
+    }
+
+    /** @param {MouseEvent} event - click on a collapse toggle. */
+    function onUserMessageClick(event) {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const button = target.closest('.dshrender-user-toggle')
+      if (!(button instanceof HTMLElement)) return
+      const node = button.closest('[data-chat-flow-kind="user"]')
+      if (!(node instanceof HTMLElement)) return
+      const bubble = node.querySelector('[data-message-bubble]')
+      if (!(bubble instanceof HTMLElement)) return
+      const collapsed = bubble.classList.toggle('dshrender-user-collapsed')
+      bubble.dataset.dshrenderUserState = collapsed ? 'collapsed' : 'expanded'
+      button.textContent = translate(collapsed ? 'expandMore' : 'showLess')
+      button.setAttribute('aria-expanded', String(!collapsed))
+    }
+
     let scanScheduled = false
     /** @type {Set<HTMLElement>} */
     const pendingBlocks = new Set()
@@ -1374,6 +1949,7 @@ window.__ModuleLoader__.load({
             }
           }
         }
+        scanUserMessages(document)
       }, 40)
     }
 
@@ -1435,7 +2011,7 @@ window.__ModuleLoader__.load({
             if (block !== null && !insideSurface(mutation.target)) markBlock(block)
           }
         }
-        if (pendingBlocks.size > 0) scheduleScan()
+        scheduleScan()
       })
       observer.observe(document.body, {
         childList: true,
@@ -1488,6 +2064,8 @@ window.__ModuleLoader__.load({
         markBlock(block)
       }
       scanBlocks(document)
+      resetUserMessages()
+      scanUserMessages(document)
       applyStyles(next)
     }
 
@@ -1516,6 +2094,196 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------ styles ------------------------------ */
 
+    /** Font stacks for every supported code-font choice (no webfonts). */
+    const CODE_FONT_STACKS = {
+      inherit: 'var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+      system: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+      jetbrains: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fira: '"Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      cascadia: '"Cascadia Code", "Cascadia Mono", ui-monospace, Menlo, Consolas, monospace',
+      sfmono: '"SF Mono", SFMono-Regular, Menlo, Consolas, monospace',
+      consolas: 'Consolas, "Liberation Mono", Menlo, monospace',
+      menlo: 'Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    }
+
+    /** @param {unknown} value - raw collapse height. @returns {number} */
+    function clampUserMessageMaxHeight(value) {
+      const height = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 360
+      return Math.min(800, Math.max(160, height))
+    }
+
+    /**
+     * Whether one user bubble should start collapsed.
+     * @param {number} scrollHeight - full bubble content height.
+     * @param {number} maxHeight - configured limit.
+     * @returns {boolean}
+     */
+    function shouldCollapseUserMessage(scrollHeight, maxHeight) {
+      return typeof scrollHeight === 'number' && scrollHeight > clampUserMessageMaxHeight(maxHeight) + 24
+    }
+
+    /** @param {Record<string, any>} appearance - normalized appearance settings. @returns {string} */
+    function codeFontStack(appearance) {
+      if (appearance.codeFont === 'custom' && typeof appearance.customCodeFont === 'string' && appearance.customCodeFont.trim() !== '') {
+        return appearance.customCodeFont.trim()
+      }
+      return CODE_FONT_STACKS[appearance.codeFont] ?? CODE_FONT_STACKS.inherit
+    }
+
+    /**
+     * Build the Markdown appearance layer. Every selector is scoped to the
+     * transcript or the document preview, so settings pages and plugin UI keep
+     * their own typography.
+     * @param {Record<string, any>} settings - normalized settings.
+     * @returns {string}
+     */
+    function appearanceCss(settings) {
+      const appearance = settings.appearance ?? {}
+      const scopes = ':is([data-chat-flow], [data-document-markdown])'
+      const font = codeFontStack(appearance)
+      const declarations = ['font-family:' + font + ';']
+      if (typeof appearance.codeFontSize === 'number' && appearance.codeFontSize > 0) {
+        declarations.push('font-size:' + appearance.codeFontSize + 'px;')
+      }
+      if (typeof appearance.codeLineHeight === 'number' && appearance.codeLineHeight > 0) {
+        declarations.push('line-height:' + appearance.codeLineHeight + ';')
+      }
+      declarations.push('font-variant-ligatures:' + (appearance.codeLigatures === true ? 'normal' : 'none') + ';')
+      const maxHeight = clampUserMessageMaxHeight(appearance.userMessageMaxHeight)
+      const rules = [
+        ':root { --dshrender-user-max-height: ' + maxHeight + 'px; }',
+        scopes + ' .md-code-block pre, ' + scopes + ' .md-code-block code, ' + scopes + ' :not(pre) > code { ' + declarations.join('') + ' }',
+      ]
+      if (appearance.inlineCode === 'claude') {
+        rules.push(
+          scopes + ' :not(pre) > code { color:color-mix(in srgb, var(--dsw-alias-link) 84%, #000 16%) !important; background:rgba(0,0,0,.055) !important; border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.38)) !important; border-radius:4px !important; padding:0.1em 0.35em !important; font-weight:400 !important; }',
+          'body[data-ds-dark-theme] ' + scopes + ' :not(pre) > code { color:var(--dsw-alias-link) !important; background:rgba(255,255,255,.09) !important; }',
+          scopes + ' pre code { color:inherit !important; background:transparent !important; border:0 !important; padding:0 !important; border-radius:0 !important; font-weight:inherit !important; }',
+        )
+      }
+      if (appearance.codeBlock === 'claude' || appearance.codeBlock === 'minimal') {
+        rules.push(
+          '.md-code-block { border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.4)); border-radius:10px; box-sizing:border-box; }',
+          '.md-code-block pre { border-bottom-left-radius:9px; border-bottom-right-radius:9px; }',
+        )
+        if (appearance.codeBlock === 'claude') {
+          rules.push('.md-code-block [data-code-block-banner] { border-bottom:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.4)); }')
+        }
+      }
+      if (appearance.table === 'claude') {
+        const table = ':is([data-chat-flow], [data-document-markdown]) table'
+        const tableScope = ':is([data-chat-flow], [data-document-markdown])'
+        rules.push(
+          // Wide tables keep the host's scroll wrapper, but force auto so the
+          // wrapper never paints an empty scrollbar (the host's hover rule uses
+          // `overflow-x: scroll`, which shows a bar even when the table fits).
+          // The table's wrapper is a flex item in the message column; without an
+          // explicit width it shrinks to the table's content, so `width:100%`
+          // on the table resolves against a tiny box (one character per column).
+          // Pin the wrapper to the conversation column first.
+          tableScope + ' div:has(> table) { width:100% !important; max-width:100% !important; }',
+          tableScope + ' .md-table-wide { width:100% !important; max-width:100% !important; margin-left:0 !important; padding-left:0 !important; overflow-x:hidden !important; padding-bottom:0 !important; }',
+          // Fit every table to the conversation column. Fixed layout shares the
+          // width equally across columns; cells wrap as much as they need. The
+          // table never exceeds the column, and there is no horizontal scroll.
+          table + ' { border-collapse:separate; border-spacing:0; border:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.4)); border-radius:10px; font-size:var(--dsh-content-font-size, 14px); line-height:1.5; width:var(--dsh-chat-content-width, 100%) !important; max-width:100% !important; table-layout:fixed !important; box-sizing:border-box !important; }',
+          table + ' th, ' + table + ' td { padding:8px 12px !important; border-bottom:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.4)) !important; vertical-align:top; font-size:var(--dsh-content-font-size, 14px) !important; line-height:1.5 !important; min-width:0 !important; max-width:none !important; white-space:normal !important; overflow-wrap:anywhere; word-break:break-word; }',
+          // Long URLs / inline code inside cells may break anywhere as well.
+          table + ' code { white-space:normal !important; overflow-wrap:anywhere; }',
+          table + ' th { background:rgba(0,0,0,.05) !important; background:color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent) !important; color:var(--dsw-alias-label-primary, #1c1d20) !important; font-weight:600 !important; line-height:1.5 !important; border-bottom:1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.4)) !important; }',
+          'body[data-ds-dark-theme] ' + table + ' th { background:rgba(255,255,255,.07) !important; }',
+          table + ' tbody tr:last-child td { border-bottom:0 !important; }',
+          table + ' th:first-child { border-top-left-radius:10px; }',
+          table + ' th:last-child { border-top-right-radius:10px; }',
+          table + ' tbody tr:last-child td:first-child { border-bottom-left-radius:10px; }',
+          table + ' tbody tr:last-child td:last-child { border-bottom-right-radius:10px; }',
+          table + ' code { font-size:0.9em !important; }',
+        )
+      }
+      return rules.join('\n')
+    }
+
+    /** @param {Record<string, any>} settings - settings snapshot. */
+    function applyAppearance(settings) {
+      let style = document.getElementById('dsh-render-appearance')
+      if (style === null) {
+        style = document.createElement('style')
+        style.id = 'dsh-render-appearance'
+        document.head.appendChild(style)
+      }
+      style.textContent = appearanceCss(settings)
+    }
+
+    /** @param {unknown} value - raw size. @param {number} min - minimum. @param {number} max - maximum. @returns {number} */
+    function clampTypographySize(value, min, max) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+      const size = Math.round(value)
+      return size === 0 ? 0 : Math.min(max, Math.max(min, size))
+    }
+
+    /**
+     * General-page typography overrides. The variables are written on body with
+     * !important so they win over the native presenter's inline values; an empty
+     * string restores the native settings.
+     * @param {Record<string, any>} settings - normalized settings.
+     * @returns {string}
+     */
+    function typographyCss(settings) {
+      const typography = settings.typography ?? {}
+      const declarations = []
+      const font = cleanCustomFont(typography.textFontFamily)
+      if (font !== '') declarations.push('--dsh-font-family-text:' + font + ' !important;')
+      const textSize = clampTypographySize(typography.textFontSize, 10, 22)
+      if (textSize > 0) declarations.push('--dsh-content-font-size:' + textSize + 'px !important;')
+      const codeSize = clampTypographySize(typography.codeFontSize, 10, 16)
+      if (codeSize > 0) declarations.push('--dsh-code-font-size:' + codeSize + 'px !important;')
+      const terminalSize = clampTypographySize(typography.terminalFontSize, 10, 20)
+      if (terminalSize > 0) declarations.push('--dsh-terminal-font-size:' + terminalSize + 'px !important;')
+      return declarations.length === 0 ? '' : 'body { ' + declarations.join('') + ' }'
+    }
+
+    /**
+     * Whole-interface zoom bounds.
+     * @param {unknown} value - raw scale.
+     * @returns {number}
+     */
+    function clampUiScale(value) {
+      const scale = typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 100) / 100 : 1
+      return Math.min(1.3, Math.max(0.8, scale))
+    }
+
+    /**
+     * Whole-interface zoom rule; 100% emits nothing so the native layout wins.
+     * @param {Record<string, any>} settings - normalized settings.
+     * @returns {string}
+     */
+    function zoomCss(settings) {
+      const scale = clampUiScale(settings.uiScale)
+      return scale === 1 ? '' : 'body { zoom: ' + scale + '; }'
+    }
+
+    /** @param {Record<string, any>} settings - normalized settings. */
+    function applyUiZoom(settings) {
+      let style = document.getElementById('dsh-render-zoom')
+      if (style === null) {
+        style = document.createElement('style')
+        style.id = 'dsh-render-zoom'
+        document.head.appendChild(style)
+      }
+      style.textContent = zoomCss(settings)
+    }
+
+    /** @param {Record<string, any>} settings - normalized settings. */
+    function applyUiTypography(settings) {
+      let style = document.getElementById('dsh-render-typography')
+      if (style === null) {
+        style = document.createElement('style')
+        style.id = 'dsh-render-typography'
+        document.head.appendChild(style)
+      }
+      style.textContent = typographyCss(settings)
+    }
+
     /** @param {Record<string, any>} settings - settings snapshot. */
     function applyStyles(settings) {
       let style = document.getElementById(STYLE_ID)
@@ -1525,6 +2293,7 @@ window.__ModuleLoader__.load({
         document.head.appendChild(style)
       }
       style.textContent = buildCss()
+      applyAppearance(settings)
     }
 
     /** @returns {string} */
@@ -1546,10 +2315,22 @@ window.__ModuleLoader__.load({
         '.dshrender-table{border-collapse:collapse;font-size:12px;line-height:18px;min-width:50%;}',
         '.dshrender-table th,.dshrender-table td{border:0.5px solid var(--dsw-alias-border-l1,rgba(127,127,127,.24));padding:5px 10px;text-align:left;vertical-align:top;}',
         '.dshrender-table th{background:var(--dsw-alias-bg-layer-2,#f5f5f5);font-weight:600;position:sticky;top:0;}',
-        '.dshrender-overlay{position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:40px;}',
-        '.dshrender-overlay-stage{max-width:min(1200px,92vw);max-height:88vh;overflow:auto;background:var(--dsw-alias-bg-layer-1,#fff);border-radius:12px;padding:20px;box-shadow:0 16px 60px rgba(0,0,0,.35);}',
-        '.dshrender-overlay-stage svg{max-width:100%;height:auto;}',
-        '.dshrender-overlay-close{position:fixed;top:18px;right:22px;border:0;border-radius:8px;padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);}',
+        ".dshrender-overlay{position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;padding:24px;overflow:hidden;}",
+        ".dshrender-overlay-stage{width:min(1500px,96vw);height:calc(100vh - 48px);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1,#fff);border-radius:12px;box-shadow:0 16px 60px rgba(0,0,0,.4);overflow:hidden;}",
+        ".dshrender-overlay-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:0.5px solid var(--dsw-alias-border-l1,rgba(127,127,127,.24));font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#888);flex:none;}",
+        ".dshrender-overlay-title{font-weight:600;color:var(--dsw-alias-label-secondary,#555);}",
+        ".dshrender-overlay-hint{color:var(--dsw-alias-label-tertiary,#888);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+        ".dshrender-overlay-actions{margin-left:auto;display:flex;align-items:center;gap:4px;flex-wrap:wrap;}",
+        ".dshrender-overlay-btn{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#555);font:inherit;font-size:12px;line-height:18px;padding:2px 8px;border-radius:var(--dsw-radius-xs,4px);cursor:pointer;}",
+        ".dshrender-overlay-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,#111);}",
+        ".dshrender-overlay-zoom{min-width:44px;text-align:center;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary,#555);}",
+        ".dshrender-overlay-viewport{position:relative;flex:1;min-height:0;overflow:hidden;cursor:grab;touch-action:none;background:var(--dsw-alias-bg-base,#fafafa);}",
+        ".dshrender-overlay-viewport[data-dragging=\"true\"]{cursor:grabbing;}",
+        ".dshrender-overlay-viewport[data-static=\"true\"]{overflow:auto;cursor:default;}",
+        ".dshrender-overlay-canvas{position:absolute;left:0;top:0;transform-origin:0 0;}",
+        ".dshrender-overlay-canvas svg{display:block;max-width:none;max-height:none;flex:none;}",
+        ".dshrender-overlay-viewport[data-static=\"true\"] .dshrender-overlay-canvas{position:relative;padding:16px;}",
+        ".dshrender-overlay-viewport[data-static=\"true\"] .dshrender-tablewrap{max-height:none;}",
         '.dshrender-settings{display:flex;flex-direction:column;gap:22px;max-width:760px;width:100%;}',
         '.dshrender-settings h2{margin:0;font-size:16px;line-height:24px;color:var(--dsw-alias-label-primary,#111);}',
         '.dshrender-settings p{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary,#888);}',
@@ -1572,10 +2353,169 @@ window.__ModuleLoader__.load({
         '.dshrender-vendor{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-tertiary,#888);}',
         '.dshrender-vendor code{font-family:var(--dsw-font-family-mono,monospace);}',
         '.dshrender-checkbox{width:15px;height:15px;accent-color:var(--dsw-alias-brand-primary,#2f6fed);}',
+        '.dshrender-user-collapsed{max-height:var(--dshrender-user-max-height,360px);overflow:hidden;-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 56px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 56px),transparent);}',
+        '.dshrender-user-toggle{align-self:flex-end;display:inline-flex;align-items:center;margin:4px 0 0;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#555);font:inherit;font-size:12px;line-height:18px;padding:2px 8px;border-radius:var(--dsw-radius-xs,4px);cursor:pointer;}',
+        '.dshrender-user-toggle:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,#111);}',
+        '.dshrender-general-typography{display:flex;flex-direction:column;gap:10px;padding:10px 0 14px;border-bottom:0.5px solid var(--dsw-alias-border-l1,rgba(127,127,127,.24));}',
+        '.dshrender-typography-head{display:flex;flex-direction:column;gap:2px;}',
+        '.dshrender-typography-grid{display:flex;flex-direction:column;gap:8px;}',
       ].join('\n')
     }
 
     /* ------------------------------ settings page ------------------------------ */
+
+    /**
+     * Persist one settings patch and apply it immediately.
+     * @param {Record<string, any>} patch - partial settings.
+     * @returns {Promise<Record<string, any>>} the normalized settings.
+     */
+    async function saveSettingsPatch(patch) {
+      const response = await fetch(API_ACTION, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ settings: patch }),
+      })
+      if (!response.ok) throw new Error('HTTP ' + response.status)
+      const payload = await response.json()
+      if (payload?.ok !== true || !isRecord(payload.value)) throw new Error('malformed action response')
+      const settings = mergeSettings(payload.value.settings, defaultSettings())
+      runtime.settings = settings
+      applyStyles(settings)
+      return settings
+    }
+
+    /**
+     * General settings page: interface font and the three font sizes. These
+     * write the same CSS variables the native Appearance rows own; an empty
+     * field or zero keeps the native value.
+     * @returns {import('react').ReactNode}
+     */
+    function TypographyGeneralRows() {
+      const [draft, setDraft] = useState(() => ({ ...runtime.settings.typography }))
+      const [busy, setBusy] = useState(false)
+      const [notice, setNotice] = useState('')
+      useEffect(() => {
+        let alive = true
+        void fetch(API_STATE, { credentials: 'same-origin', headers: { accept: 'application/json' } })
+          .then(response => response.json())
+          .then(payload => {
+            if (!alive || payload?.ok !== true || !isRecord(payload.value)) return
+            const merged = mergeSettings(payload.value.settings, defaultSettings())
+            runtime.settings = merged
+            setDraft({ ...merged.typography })
+          })
+          .catch(() => { /* keep the current draft */ })
+        return () => { alive = false }
+      }, [])
+      const patch = value => setDraft(current => ({ ...current, ...value }))
+      const save = async reset => {
+        setBusy(true)
+        setNotice('')
+        try {
+          const typography = reset
+            ? { textFontFamily: '', textFontSize: 0, codeFontSize: 0, terminalFontSize: 0 }
+            : draft
+          const settings = await saveSettingsPatch({ typography })
+          setDraft({ ...settings.typography })
+          setNotice(translate('typographySaved'))
+        } catch (cause) {
+          setNotice(translate('typographySaveFailed') + ': ' + messageOf(cause))
+        } finally {
+          setBusy(false)
+        }
+      }
+      return h('div', { className: 'dshrender-general-typography' },
+        h('div', { className: 'dshrender-typography-head' },
+          h('span', { className: 'dshrender-row-title' }, translate('typographyTitle')),
+          h('span', { className: 'dshrender-row-hint' }, translate('typographyHint'))),
+        h('div', { className: 'dshrender-typography-grid' },
+          settingRow(translate('typographyFont'), translate('typographyFontPlaceholder'),
+            h('input', {
+              className: 'dshrender-input', type: 'text', value: draft.textFontFamily,
+              onChange: event => { patch({ textFontFamily: event.target.value }) },
+            })),
+          settingRow(translate('typographyTextSize'), translate('typographySizeHint'),
+            h('input', {
+              className: 'dshrender-input', type: 'number', min: 0, max: 22, step: 1, value: draft.textFontSize,
+              onChange: event => { patch({ textFontSize: Number(event.target.value) || 0 }) },
+            })),
+          settingRow(translate('typographyCodeSize'), translate('typographySizeHint'),
+            h('input', {
+              className: 'dshrender-input', type: 'number', min: 0, max: 16, step: 1, value: draft.codeFontSize,
+              onChange: event => { patch({ codeFontSize: Number(event.target.value) || 0 }) },
+            })),
+          settingRow(translate('typographyTerminalSize'), translate('typographySizeHint'),
+            h('input', {
+              className: 'dshrender-input', type: 'number', min: 0, max: 20, step: 1, value: draft.terminalFontSize,
+              onChange: event => { patch({ terminalFontSize: Number(event.target.value) || 0 }) },
+            }))),
+        h('div', { className: 'dshrender-actions-row' },
+          h('button', {
+            type: 'button', className: 'dshrender-primary', disabled: busy,
+            onClick: () => { void save(false) },
+          }, busy ? translate('saving') : translate('typographySave')),
+          h('button', {
+            type: 'button', className: 'dshrender-secondary', disabled: busy,
+            onClick: () => { void save(true) },
+          }, translate('typographyFollowNative'))),
+        notice === '' ? null : h('p', { className: 'dshrender-note' }, notice))
+    }
+
+    /**
+     * General settings page: whole-interface zoom (font and controls).
+     * @returns {import('react').ReactNode}
+     */
+    function UiScaleRows() {
+      const [percent, setPercent] = useState(() => Math.round((runtime.settings.uiScale ?? 1) * 100))
+      const [busy, setBusy] = useState(false)
+      const [notice, setNotice] = useState('')
+      useEffect(() => {
+        let alive = true
+        void fetch(API_STATE, { credentials: 'same-origin', headers: { accept: 'application/json' } })
+          .then(response => response.json())
+          .then(payload => {
+            if (!alive || payload?.ok !== true || !isRecord(payload.value)) return
+            const merged = mergeSettings(payload.value.settings, defaultSettings())
+            runtime.settings = merged
+            setPercent(Math.round((merged.uiScale ?? 1) * 100))
+          })
+          .catch(() => { /* keep the current value */ })
+        return () => { alive = false }
+      }, [])
+      const save = async value => {
+        setBusy(true)
+        setNotice('')
+        try {
+          const settings = await saveSettingsPatch({ uiScale: value / 100 })
+          setPercent(Math.round((settings.uiScale ?? 1) * 100))
+          setNotice(translate('uiScaleSaved'))
+        } catch (cause) {
+          setNotice(translate('uiScaleSaveFailed') + ': ' + messageOf(cause))
+        } finally {
+          setBusy(false)
+        }
+      }
+      return h('div', { className: 'dshrender-general-typography' },
+        h('div', { className: 'dshrender-typography-head' },
+          h('span', { className: 'dshrender-row-title' }, translate('uiScaleTitle')),
+          h('span', { className: 'dshrender-row-hint' }, translate('uiScaleHint'))),
+        h('div', { className: 'dshrender-actions-row' },
+          h('input', {
+            className: 'dshrender-input', type: 'number', min: 80, max: 130, step: 5, value: percent,
+            onChange: event => { setPercent(Number(event.target.value) || 100) },
+          }),
+          h('span', { className: 'dshrender-row-hint' }, '%'),
+          h('button', {
+            type: 'button', className: 'dshrender-primary', disabled: busy,
+            onClick: () => { void save(percent) },
+          }, busy ? translate('saving') : translate('uiScaleSave')),
+          h('button', {
+            type: 'button', className: 'dshrender-secondary', disabled: busy,
+            onClick: () => { void save(100) },
+          }, translate('uiScaleReset'))),
+        notice === '' ? null : h('p', { className: 'dshrender-note' }, notice))
+    }
 
     /**
      * Settings → Rendering page.
@@ -1660,6 +2600,10 @@ window.__ModuleLoader__.load({
         setDraft(current => current === null ? current : { ...current, prompt: { ...current.prompt, ...value } })
       }, [])
 
+      const setAppearance = useCallback((value) => {
+        setDraft(current => current === null ? current : { ...current, appearance: { ...current.appearance, ...value } })
+      }, [])
+
       if (phase === 'loading' && state === null) {
         return h('div', { className: 'dshrender-settings' },
           h('h2', null, translate('title')),
@@ -1681,6 +2625,81 @@ window.__ModuleLoader__.load({
           h('span', null, translate('vendorLabel') + ': '),
           h('span', null, translate('mermaidVersion') + ' ' + (vendor.mermaid?.version ?? '—') + ' · ' + (vendor.mermaid?.ready === true ? translate('vendorReady') : translate('vendorMissing'))),
           h('span', null, translate('echartsVersion') + ' ' + (vendor.echarts?.version ?? '—') + ' · ' + (vendor.echarts?.ready === true ? translate('vendorReady') : translate('vendorMissing')))),
+        h('div', { className: 'dshrender-group' },
+          h('h3', null, translate('sectionAppearance')),
+          h('p', { className: 'dshrender-row-hint' }, translate('appearanceHint')),
+          settingRow(translate('tableStyle'), null,
+            h('select', {
+              className: 'dshrender-select', value: settings.appearance.table,
+              onChange: event => { setAppearance({ table: event.target.value }) },
+            },
+            h('option', { value: 'claude' }, translate('tableStyleClaude')),
+            h('option', { value: 'dsh' }, translate('tableStyleDsh')))),
+          settingRow(translate('inlineStyle'), null,
+            h('select', {
+              className: 'dshrender-select', value: settings.appearance.inlineCode,
+              onChange: event => { setAppearance({ inlineCode: event.target.value }) },
+            },
+            h('option', { value: 'claude' }, translate('inlineStyleClaude')),
+            h('option', { value: 'dsh' }, translate('inlineStyleDsh')))),
+          settingRow(translate('codeBlockStyle'), null,
+            h('select', {
+              className: 'dshrender-select', value: settings.appearance.codeBlock,
+              onChange: event => { setAppearance({ codeBlock: event.target.value }) },
+            },
+            h('option', { value: 'claude' }, translate('codeBlockClaude')),
+            h('option', { value: 'minimal' }, translate('codeBlockMinimal')),
+            h('option', { value: 'dsh' }, translate('codeBlockDsh')))),
+          settingRow(translate('codeFont'), null,
+            h('select', {
+              className: 'dshrender-select', value: settings.appearance.codeFont,
+              onChange: event => { setAppearance({ codeFont: event.target.value }) },
+            },
+            h('option', { value: 'inherit' }, translate('codeFontInherit')),
+            h('option', { value: 'system' }, translate('codeFontSystem')),
+            h('option', { value: 'jetbrains' }, translate('codeFontJetbrains')),
+            h('option', { value: 'fira' }, translate('codeFontFira')),
+            h('option', { value: 'cascadia' }, translate('codeFontCascadia')),
+            h('option', { value: 'sfmono' }, translate('codeFontSfmono')),
+            h('option', { value: 'consolas' }, translate('codeFontConsolas')),
+            h('option', { value: 'menlo' }, translate('codeFontMenlo')),
+            h('option', { value: 'custom' }, translate('codeFontCustom')))),
+          settings.appearance.codeFont === 'custom'
+            ? settingRow(translate('customCodeFont'), translate('customCodeFontHint'),
+              h('input', {
+                className: 'dshrender-input', type: 'text', value: settings.appearance.customCodeFont,
+                onChange: event => { setAppearance({ customCodeFont: event.target.value }) },
+              }))
+            : null,
+          settingRow(translate('codeFontSize'), translate('codeFontSizeHint'),
+            h('input', {
+              className: 'dshrender-input', type: 'number', min: 0, max: 20, step: 1,
+              value: settings.appearance.codeFontSize,
+              onChange: event => { setAppearance({ codeFontSize: Number(event.target.value) || 0 }) },
+            })),
+          settingRow(translate('codeLineHeight'), translate('codeLineHeightHint'),
+            h('input', {
+              className: 'dshrender-input', type: 'number', min: 0, max: 2, step: 0.05,
+              value: settings.appearance.codeLineHeight,
+              onChange: event => { setAppearance({ codeLineHeight: Number(event.target.value) || 0 }) },
+            })),
+          settingRow(translate('codeLigatures'), translate('codeLigaturesHint'),
+            h('input', {
+              className: 'dshrender-checkbox', type: 'checkbox', checked: settings.appearance.codeLigatures,
+              onChange: event => { setAppearance({ codeLigatures: event.target.checked }) },
+            })),
+          settingRow(translate('collapseUserMessages'), translate('collapseUserMessagesHint'),
+            h('input', {
+              className: 'dshrender-checkbox', type: 'checkbox', checked: settings.appearance.collapseUserMessages,
+              onChange: event => { setAppearance({ collapseUserMessages: event.target.checked }) },
+            })),
+          settingRow(translate('userMessageMaxHeight'), translate('userMessageMaxHeightHint'),
+            h('input', {
+              className: 'dshrender-input', type: 'number', min: 160, max: 800, step: 20,
+              value: settings.appearance.userMessageMaxHeight,
+              disabled: settings.appearance.collapseUserMessages !== true,
+              onChange: event => { setAppearance({ userMessageMaxHeight: Number(event.target.value) || 360 }) },
+            }))),
         h('div', { className: 'dshrender-group' },
           h('h3', null, translate('sectionDiagrams')),
           settingRow(translate('mermaidEnabled'), translate('mermaidEnabledHint'),
@@ -1803,11 +2822,14 @@ window.__ModuleLoader__.load({
         runtime.settings = settings
         applyStyles(settings)
         scanBlocks(document)
+        resetUserMessages()
+        scanUserMessages(document)
       })
 
       if (document.body !== null) {
         ctx.effect(() => startObserver(), 'dsh-render: markdown observer')
         scanBlocks(document)
+        scanUserMessages(document)
       }
 
       ctx.effect(() => {
@@ -1816,9 +2838,15 @@ window.__ModuleLoader__.load({
           // Catch blocks that mounted before the observer or through a route
           // swap that did not produce a relevant mutation record.
           scanBlocks(document)
-        }, 4000)
+          scanUserMessages(document)
+          }, 4000)
         return () => clearInterval(timer)
       }, 'dsh-render: periodic sweep')
+
+      ctx.effect(() => {
+        document.addEventListener('click', onUserMessageClick)
+        return () => document.removeEventListener('click', onUserMessageClick)
+      }, 'dsh-render: user message collapse')
 
       ctx.slots?.inject?.('settings.section', () => ctx.slots.register({
         name: 'settings.section',
@@ -1827,6 +2855,7 @@ window.__ModuleLoader__.load({
         label: () => translate('nav'),
         locale: NS,
       }, RenderSettingsSection))
+
 
       ctx.effect(() => () => {
         runtime.disposed = true
@@ -1844,6 +2873,7 @@ window.__ModuleLoader__.load({
         for (const block of document.querySelectorAll(BLOCK_SELECTOR)) {
           setSourceHidden(block, false)
         }
+        resetUserMessages()
         document.getElementById(STYLE_ID)?.remove()
       }, 'dsh-render: teardown')
     }
@@ -1854,6 +2884,8 @@ window.__ModuleLoader__.load({
       globalThis.__DSH_RENDER_TEST_EXPORTS__ = {
         mergeSettings, defaultSettings, detectFenceKind, looksLikeCsv, parseCsv,
         parseEchartsOption, splitCsvLine, hashString, firstMeaningfulLine, renderCsvTable,
+        clampZoom, fitTransform, zoomAt, appearanceCss, cleanCustomFont, clampUserMessageMaxHeight, shouldCollapseUserMessage,
+        typographyCss, clampTypographySize, zoomCss, clampUiScale,
       }
     }
 

@@ -33,7 +33,26 @@
     "heuristic": true,
     "extraKeywords": []
   },
-  "prompt": { "enabled": false }
+  "prompt": { "enabled": false },
+  "appearance": {
+    "table": "claude",
+    "inlineCode": "brand",
+    "codeBlock": "claude",
+    "codeFont": "inherit",
+    "customCodeFont": "",
+    "codeFontSize": 0,
+    "codeLineHeight": 0,
+    "codeLigatures": false
+    "collapseUserMessages": true,
+    "userMessageMaxHeight": 360
+  },
+  "typography": {
+    "textFontFamily": "",
+    "textFontSize": 0,
+    "codeFontSize": 0,
+    "terminalFontSize": 0
+  },
+  "uiScale": 1
 }
 ```
 
@@ -43,6 +62,21 @@
 - `mermaid.debounceMs` ∈ `[200, 3000]`；
 - `mermaid.maxSourceChars` ∈ `[2000, 2000000]`；
 - `detection.extraKeywords`：最多 50 条，每条 trim 后 ≤64 字符，去重；
+- `appearance.table` ∈ `claude | dsh`；
+- `appearance.inlineCode` ∈ `claude | dsh`（旧值 `brand` 兼容映射为 `claude`）；
+- `appearance.codeBlock` ∈ `claude | minimal | dsh`；
+- `appearance.codeFont` ∈ `inherit | system | jetbrains | fira | cascadia | sfmono | consolas | menlo | custom`；
+- `appearance.customCodeFont`：去除控制字符与 `; { } < > \\`，trim 后 ≤200 字符；
+- `appearance.codeFontSize`：`0`（跟随 DSH 外观）或 `[12, 20]`；
+- `appearance.codeLineHeight`：`0`（跟随 DSH 外观）或 `[1.4, 1.9]`；
+- `appearance.collapseUserMessages`：boolean，默认 `true`（长用户消息默认折叠）；
+- `appearance.userMessageMaxHeight`：`[160, 800]`，默认 `360`；
+- `typography.textFontFamily`：字体栈字符串，去控制字符与 `; { } < > \\` 后 ≤200 字符，空串跟随原生；
+- `typography.textFontSize`：`0`（跟随原生）或 `[10, 22]`；
+- `typography.codeFontSize`：`0` 或 `[10, 16]`；
+- `typography.terminalFontSize`：`0` 或 `[10, 20]`；
+- `uiScale`：`[0.8, 1.3]`，默认 `1`（100%），按 0.01 取整；
+- `typography` 与 `uiScale` 目前是保留字段：界面不再暴露入口，也不会应用（通用页相关功能已撤销）。
 - 未知字段丢弃；缺失字段用默认值补齐；
 - 文件损坏时备份为 `settings.json.bak-<timestamp>` 并回退默认值。
 
@@ -192,7 +226,36 @@
 - 颜色使用 `--dsw-alias-*`、`--dsw-radius-*`、`--dsw-font-family` 等主题变量；
 - 不覆盖宿主全局选择器。
 
-### 4.3 生命周期
+### 4.3 全屏查看器
+
+- 点击 `data-act="fullscreen"` 打开 overlay：stage 占 `96vw × calc(100vh - 48px)`（扣掉 overlay 的 24px 上下内边距，页面不出现滚动条），内容在克隆的 canvas 上做 `translate + scale`；
+- **不修改克隆图本身**：不清除/重设 `viewBox`、不改 `overflow`、不改属性，只按它在消息中已有的显示尺寸（`getBoundingClientRect`）渲染克隆 SVG；缩放时 SVG 保持原布局尺寸（`flex: none`），只对整个画布做 `translate + scale`——这样 Mermaid 的 foreignObject HTML 不会被重新布局，不会再产生图内滚动条或节点裁剪；同时移除 `will-change: transform`，避免图层被提前栅格化；这样图的内容与消息里一致、不会被 viewBox/getBBox 裁剪，放大也不会模糊；
+- **初始打开按 contain 完整显示整张图**；滚轮围绕画布中心缩放（范围 **2%–2000%**）；放大后拖拽平移，平移量被钳制在「内容超出画布」的范围内；「适应屏幕」回到完整视图，**「重置缩放」回到 100% 居中**（键盘 `R` 同样重置）；
+- 键盘 `+`/`-` 缩放、`0`/`F`/`R` 适应屏幕、`Esc` 关闭；
+- 打开期间锁定 `body` 滚动，关闭时恢复；
+- 仅 CSV 表格走静态滚动模式；Mermaid/ECharts（含找不到 SVG 的降级渲染）始终使用可缩放/拖拽查看器；
+- 关闭时移除 overlay、恢复 body 滚动并移除 keydown/resize 监听。
+
+### 4.4 Markdown 外观层
+
+- 由 `client.js` 的 `appearanceCss(settings)` 生成，写入 `<style id="dsh-render-appearance">`，与渲染器样式 `<style id="dsh-render-styles">` 分离；
+- 作用域：`:is([data-chat-flow], [data-document-markdown])`，不触碰设置页、插件 UI 或其它宿主区域；
+- 代码字体/字号/行高/连字：作用于 `.md-code-block pre`、`.md-code-block code`、`:not(pre) > code`；`codeFontSize=0` / `codeLineHeight=0` 时沿用 DSH 外观设置（`--dsh-code-font-size`、`--dsw-font-markdown-code-block`）；
+- 行内 code：`inlineCode=claude` 时保留 **蓝色文字并加深**（亮 `color-mix(--dsw-alias-link 84%, #000 16%)` / 暗 `--dsw-alias-link`）、灰色底（亮 `rgba(0,0,0,.055)` / 暗 `rgba(255,255,255,.09)`）、**1px 灰色描边**（`--dsw-alias-border-l2`，比背景更深）、`font-weight:400`（不加粗）、4px 圆角；代码块内 `pre code` 重置为透明/无边框/常规字重；
+- 代码块：`codeBlock=claude|minimal` 时 `.md-code-block` 加 **1px `--dsw-alias-border-l2`** 边框 + 10px 圆角；`claude` 额外给 `[data-code-block-banner]` 底部分隔线（同色）；
+- 表格：`table=claude` 时给 `[data-chat-flow] table` / `[data-document-markdown] table` 应用 **Claude 风格**：1px 外框（`--dsw-alias-border-l2`，比 `l1` 稍深）、10px 圆角、表头半透明灰底（亮 `rgba(0,0,0,.05)` / 暗 `rgba(255,255,255,.07)`，另以 `color-mix(label-primary 6%)` 兜底）、表头 `label-primary` + 600 字重（避免次级文字色在浅灰底上显得发虚）、表头底部 1px `--dsw-alias-border-l2`、行间 1px `--dsw-alias-border-l2`、`8px 12px` 内边距、顶部对齐、行高 1.5、无竖线、**无行悬停**；**字号使用 `var(--dsh-content-font-size, 14px)`，随设置 → 外观的通用字号变化**（表格内 code 为 `0.9em` 随表格缩放）；**所有表格强制适应会话列宽**：直接包含表格的外层 `div:has(> table)` 先强制 `width:100%`（否则它作为 flex item 会收缩到内容宽，令表格的 100% 失去参照），表格再用 `width:100%` + `max-width:100%` + `table-layout:fixed` + `box-sizing:border-box`，列宽等分，单元格 `white-space:normal` + `overflow-wrap:anywhere` 允许严重换行，长 URL/行内 code 也可断行；宽表外层 `.md-table-wide` 用 `overflow-x:auto`（覆盖宿主悬停时的 `overflow-x:scroll`，无溢出时不显示滚动条），保证表格不超出会话宽度；CSV 表格（`.dshrender-table`）落在同一作用域内，随之统一；
+- 所有样式均限定在 Markdown 区域，插件禁用时随 `dsh-render-appearance` 一起移除。
+
+### 4.5 长用户消息折叠
+
+- 锚点：聊天流中的 `[data-chat-flow-kind="user"]` 节点，折叠对象为其内部的 `[data-message-bubble]`；
+- 当 `bubble.scrollHeight > 阈值 + 24` 时，给气泡加 `.dshrender-user-collapsed`（`max-height: var(--dshrender-user-max-height)` + `overflow:hidden` + 底部 56px 渐变遮罩），并在气泡后插入 `.dshrender-user-toggle` 按钮；
+- 按钮文案来自 locale 的 `expandMore` / `showLess`；点击切换折叠 class 并设置 `aria-expanded`；
+- 已展开/已折叠的气泡用 `data-dshrender-user-state` 标记，避免重复测量；设置变更时先重置全部再重新评估；
+- 默认折叠（`collapseUserMessages: true`）；关闭设置或插件 teardown 时移除按钮与折叠 class；
+- 重渲染/切换会话后气泡为新节点，重新按默认折叠；折叠只作用于文本气泡，附件与图片留在气泡外。
+
+### 4.6 生命周期
 
 - 启动：`apply(ctx)` 注册 locale、注入样式、启动 `MutationObserver`（`document.body`，`childList/subtree/characterData/attributes[data-ds-dark-theme]`）、启动 4s 周期清扫；
 - 设置加载：`GET /state` 成功后更新内存设置并重扫；

@@ -120,6 +120,150 @@ test('renderCsvTable escapes every cell', () => {
   assert.match(html, /&quot;quoted&quot;/)
 })
 
+test('fitTransform centers and scales content inside the viewport', () => {
+  const fitted = helpers.fitTransform(400, 200, 1000, 600)
+  assert.ok(Math.abs(fitted.scale - 2.35) < 1e-9, 'scale uses the limiting axis')
+  assert.ok(Math.abs(fitted.x - 30) < 1e-9, 'content is horizontally centered')
+  assert.ok(Math.abs(fitted.y - 65) < 1e-9, 'content is vertically centered')
+})
+
+test('fitTransform guards empty sizes and clampZoom bounds external scales', () => {
+  assert.deepEqual({ ...helpers.fitTransform(0, 200, 1000, 600) }, { scale: 1, x: 0, y: 0 })
+  assert.equal(helpers.clampZoom(0.001), 0.02)
+  assert.equal(helpers.clampZoom(999), 20)
+  assert.equal(helpers.clampZoom(Number.NaN), 1)
+})
+
+test('zoomAt keeps the pointer anchor fixed', () => {
+  const next = helpers.zoomAt({ scale: 1, x: 100, y: 50 }, 2, 300, 200)
+  assert.equal(next.scale, 2)
+  assert.equal(next.x, -100)
+  assert.equal(next.y, -100)
+  assert.equal((300 - next.x) / next.scale, 200, 'anchor X stays over the same content point')
+  assert.equal((200 - next.y) / next.scale, 150, 'anchor Y stays over the same content point')
+})
+
+test('mergeSettings normalizes the appearance group', () => {
+  const merged = helpers.mergeSettings({
+    appearance: {
+      table: 'dsh',
+      inlineCode: 'brand',
+      codeBlock: 'minimal',
+      codeFont: 'custom',
+      customCodeFont: ' "Mono"; {} ',
+      codeFontSize: 99,
+      codeLineHeight: 0.2,
+      codeLigatures: true,
+      collapseUserMessages: false,
+      userMessageMaxHeight: 9999,
+    },
+    typography: {
+      textFontFamily: ' "UI"; {} ',
+      textFontSize: 99,
+      codeFontSize: 5,
+      terminalFontSize: 999,
+    },
+    uiScale: 1.2,
+  }, helpers.defaultSettings())
+  assert.equal(merged.appearance.table, 'dsh')
+  assert.equal(merged.appearance.inlineCode, 'claude', 'the legacy brand value maps to the Claude chip')
+  assert.equal(merged.appearance.codeBlock, 'minimal')
+  assert.equal(merged.appearance.codeFont, 'custom')
+  assert.equal(merged.appearance.customCodeFont, '"Mono"')
+  assert.equal(merged.appearance.codeFontSize, 20)
+  assert.equal(merged.appearance.codeLineHeight, 1.4)
+  assert.equal(merged.appearance.codeLigatures, true)
+  assert.equal(merged.appearance.collapseUserMessages, false)
+  assert.equal(merged.appearance.userMessageMaxHeight, 800)
+  assert.equal(merged.typography.textFontFamily, '"UI"')
+  assert.equal(merged.typography.textFontSize, 22)
+  assert.equal(merged.typography.codeFontSize, 10)
+  assert.equal(merged.typography.terminalFontSize, 20)
+  assert.equal(merged.uiScale, 1.2)
+})
+
+test('appearanceCss scopes the Claude styles to Markdown regions', () => {
+  const defaults = helpers.defaultSettings()
+  const css = helpers.appearanceCss(defaults)
+  assert.match(css, /\[data-chat-flow\], \[data-document-markdown\]/)
+  assert.match(css, /\.md-code-block \{ border:1px solid/)
+  assert.match(css, /:is\(\[data-chat-flow\], \[data-document-markdown\]\) table/)
+  assert.match(css, /background:rgba\(0,0,0,\.055\)/)
+  assert.match(css, /font-weight:600/)
+  assert.match(css, /font-weight:400/)
+  assert.match(css, /table-layout:fixed !important/)
+  assert.match(css, /box-sizing:border-box !important/)
+  assert.match(css, /overflow-wrap:anywhere/)
+  assert.match(css, /div:has\(> table\) \{ width:100% !important; max-width:100% !important; \}/)
+  assert.match(css, /width:var\(--dsh-chat-content-width, 100%\) !important/)
+  assert.match(css, /margin-left:0 !important; padding-left:0 !important; overflow-x:hidden !important/)
+  assert.match(css, /\.md-table-wide \{ width:100% !important; max-width:100% !important; margin-left:0 !important; padding-left:0 !important; overflow-x:hidden !important; padding-bottom:0 !important; \}/)
+  assert.match(css, /--dsw-alias-link/)
+  assert.match(css, /border:1px solid var\(--dsw-alias-border-l2/)
+  assert.match(css, /table \{ border-collapse:separate; border-spacing:0; border:1px solid var\(--dsw-alias-border-l2/)
+  assert.match(css, /th \{ background:rgba\(0,0,0,\.05\)/)
+  assert.match(css, /color:var\(--dsw-alias-label-primary, #1c1d20\)/)
+  assert.match(css, /font-size:var\(--dsh-content-font-size, 14px\)/)
+  assert.match(css, /--dshrender-user-max-height: 360px/)
+  assert.doesNotMatch(css, /tbody tr:hover/)
+  assert.match(css, /table \{ border-collapse:separate; border-spacing:0; border:1px solid/)
+  const plain = helpers.appearanceCss(helpers.mergeSettings({
+    appearance: { inlineCode: 'dsh', table: 'dsh', codeBlock: 'dsh' },
+  }, defaults))
+  assert.doesNotMatch(plain, /--dsw-alias-link/)
+  assert.doesNotMatch(plain, /background:rgba\(0,0,0,\.055\)/)
+  assert.doesNotMatch(plain, /\.md-code-block \{ border/)
+})
+
+test('appearanceCss applies code font overrides and custom stacks', () => {
+  const custom = helpers.mergeSettings({
+    appearance: {
+      codeFont: 'custom',
+      customCodeFont: '"My Mono", monospace',
+      codeFontSize: 15,
+      codeLineHeight: 1.7,
+      codeLigatures: true,
+    },
+  }, helpers.defaultSettings())
+  const css = helpers.appearanceCss(custom)
+  assert.match(css, /font-family:"My Mono", monospace;/)
+  assert.match(css, /font-size:15px;/)
+  assert.match(css, /line-height:1.7;/)
+  assert.match(css, /font-variant-ligatures:normal;/)
+})
+
+test('typographyCss emits body variable overrides for the General page', () => {
+  const settings = helpers.mergeSettings({
+    typography: { textFontFamily: '"My UI", sans-serif', textFontSize: 18, codeFontSize: 0, terminalFontSize: 14 },
+  }, helpers.defaultSettings())
+  const css = helpers.typographyCss(settings)
+  assert.match(css, /^body \{/)
+  assert.match(css, /--dsh-font-family-text:"My UI", sans-serif !important;/)
+  assert.match(css, /--dsh-content-font-size:18px !important;/)
+  assert.doesNotMatch(css, /--dsh-code-font-size/)
+  assert.match(css, /--dsh-terminal-font-size:14px !important;/)
+  assert.equal(helpers.typographyCss(helpers.defaultSettings()), '')
+  assert.equal(helpers.clampTypographySize(5, 10, 22), 10)
+  assert.equal(helpers.clampTypographySize(0, 10, 22), 0)
+  assert.equal(helpers.clampTypographySize(99, 10, 22), 22)
+})
+
+test('zoomCss emits a body zoom rule and clamps the scale', () => {
+  assert.equal(helpers.zoomCss(helpers.defaultSettings()), '')
+  const zoomed = helpers.mergeSettings({ uiScale: 1.15 }, helpers.defaultSettings())
+  assert.equal(helpers.zoomCss(zoomed), 'body { zoom: 1.15; }')
+  assert.equal(helpers.clampUiScale(2), 1.3)
+  assert.equal(helpers.clampUiScale(0.5), 0.8)
+})
+
+test('shouldCollapseUserMessage only folds bubbles taller than the threshold', () => {
+  assert.equal(helpers.shouldCollapseUserMessage(400, 360), true)
+  assert.equal(helpers.shouldCollapseUserMessage(380, 360), false)
+  assert.equal(helpers.shouldCollapseUserMessage(100, 9999), false)
+  assert.equal(helpers.clampUserMessageMaxHeight(10), 160)
+  assert.equal(helpers.clampUserMessageMaxHeight(9999), 800)
+})
+
 test('hashString is stable and distinguishes content', () => {
   assert.equal(helpers.hashString('flowchart TD\nA-->B'), helpers.hashString('flowchart TD\nA-->B'))
   assert.notEqual(helpers.hashString('a'), helpers.hashString('b'))
